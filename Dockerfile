@@ -8,8 +8,8 @@ RUN CGO_ENABLED=0 go build -o /hoard ./cmd/server
 
 # ---- run ----
 FROM alpine:3.20
-RUN adduser -D -u 10001 app
-USER app
+RUN adduser -D -u 10001 app && mkdir -p /data && chown app:app /data
 COPY --from=build /hoard /usr/local/bin/hoard
+USER app
 EXPOSE 8081
 ENTRYPOINT ["hoard"]
