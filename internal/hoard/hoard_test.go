@@ -19,7 +19,7 @@ func TestUploadListDownloadMrpack(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := chi.NewRouter()
-	store.Register(r)
+	store.Register(r, "")
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 

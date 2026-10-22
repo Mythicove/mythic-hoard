@@ -10,9 +10,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Register 注册路由。
-func (s *Store) Register(r chi.Router) {
-	r.Post("/api/mods", s.handleUpload)
+// Register 注册路由；adminToken 用于保护上传端点（空则开放）。
+func (s *Store) Register(r chi.Router, adminToken string) {
+	r.Group(func(r chi.Router) {
+		r.Use(Admin(adminToken))
+		r.Post("/api/mods", s.handleUpload)
+	})
 	r.Get("/api/mods", s.handleList)
 	r.Get("/api/mods/{id}", s.handleGetProject)
 	r.Get("/api/mods/{id}/download", s.handleDownload)
