@@ -1,6 +1,8 @@
 package hoard
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha1"
@@ -12,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Mythicove/mythic-hoard/internal/modmeta"
 	"github.com/Mythicove/mythic-hoard/internal/oidcrp"
 	"github.com/Mythicove/shared/queue"
 	"github.com/Mythicove/shared/search"
@@ -82,10 +85,9 @@ type UploadInput struct {
 }
 
 // Upload 存储文件并创建 project + version + file 元数据。
+// jar 内的 mod 元数据（fabric/quilt/forge/neoforge）用于填充表单缺省值；
+// 表单值与元数据冲突时记录 metadata_flags（表单优先，不覆盖）。
 func (s *Service) Upload(ctx context.Context, in UploadInput) (*Project, error) {
-	if strings.TrimSpace(in.Title) == "" || in.Filename == "" {
-		return nil, ErrInvalid
-	}
 	if in.ProjectType == "" {
 		in.ProjectType = "mod"
 	}
@@ -97,9 +99,39 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*Project, error) 
 		status = "under_review"
 	}
 
-	storageKey, sha1sum, sha512sum, size, err := s.storeFile(ctx, in.Data)
+	storageKey, sha1sum, sha512sum, size, meta, iconData, err := s.storeFile(ctx, in.Data)
 	if err != nil {
 		return nil, err
+	}
+
+	// 元数据填充（表单优先）与冲突标旗
+	var flags []string
+	if in.Title == "" {
+		in.Title = meta.Name
+	} else if meta.Name != "" && in.Title != meta.Name {
+		flags = append(flags, "title_mismatch")
+	}
+	if in.Description == "" {
+		in.Description = meta.Description
+	} else if meta.Description != "" && in.Description != meta.Description {
+		flags = append(flags, "description_mismatch")
+	}
+	if len(in.Loaders) == 0 && meta.Loader != "" {
+		in.Loaders = []string{meta.Loader}
+	} else if meta.Loader != "" && !containsStr(in.Loaders, meta.Loader) {
+		flags = append(flags, "loader_mismatch")
+	}
+	if len(in.GameVersions) == 0 {
+		in.GameVersions = meta.GameVersions
+	} else if len(meta.GameVersions) > 0 && !anyOverlap(in.GameVersions, meta.GameVersions) {
+		flags = append(flags, "game_versions_mismatch")
+	}
+	if in.VersionNumber == "" {
+		in.VersionNumber = meta.Version
+	}
+
+	if strings.TrimSpace(in.Title) == "" || in.Filename == "" {
+		return nil, ErrInvalid
 	}
 
 	proj, err := s.store.CreateProject(ctx, NewProject{
@@ -114,10 +146,25 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*Project, error) 
 		Loaders:      in.Loaders,
 		GameVersions: in.GameVersions,
 		Categories:   in.Categories,
+		License:      meta.License,
+		MetaFlags:    flags,
 	})
 	if err != nil {
 		return nil, err
 	}
+
+	// jar 内 icon → 对象存储 + 项目关联
+	if len(iconData) > 0 {
+		iconKey := "icons/" + sha512sum[:32]
+		if _, perr := s.files.Put(ctx, storage.Object{
+			Key: iconKey, Size: int64(len(iconData)), ContentType: "image/png", Body: bytes.NewReader(iconData),
+		}); perr == nil {
+			if serr := s.store.SetProjectIcon(ctx, proj.ID, iconKey); serr == nil {
+				proj.IconKey = iconKey
+			}
+		}
+	}
+	s.fillIconURL(proj)
 
 	ver, err := s.store.CreateVersion(ctx, proj.ID, NewVersion{
 		Name:          in.VersionName,
@@ -146,10 +193,10 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*Project, error) 
 	return proj, nil
 }
 
-func (s *Service) storeFile(ctx context.Context, r io.Reader) (key, sha1sum, sha512sum string, size int64, err error) {
+func (s *Service) storeFile(ctx context.Context, r io.Reader) (key, sha1sum, sha512sum string, size int64, meta modmeta.Meta, iconData []byte, err error) {
 	tmp, err := os.CreateTemp("", "hoard-upload-*")
 	if err != nil {
-		return "", "", "", 0, err
+		return "", "", "", 0, meta, nil, err
 	}
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
@@ -158,18 +205,25 @@ func (s *Service) storeFile(ctx context.Context, r io.Reader) (key, sha1sum, sha
 	h512 := sha512.New()
 	n, err := io.Copy(io.MultiWriter(tmp, h1, h512), io.LimitReader(r, s.maxFileBytes+1))
 	if err != nil {
-		return "", "", "", 0, err
+		return "", "", "", 0, meta, nil, err
 	}
 	if n > s.maxFileBytes {
-		return "", "", "", 0, ErrFileTooLarge
+		return "", "", "", 0, meta, nil, ErrFileTooLarge
 	}
 	size = n
 	sha1sum = hex.EncodeToString(h1.Sum(nil))
 	sha512sum = hex.EncodeToString(h512.Sum(nil))
 	key = "files/" + sha512sum
 
+	// mod 元数据解析（jar=zip；非 zip 或无元数据文件时静默返回零值）
+	if zr, zerr := zip.OpenReader(tmp.Name()); zerr == nil {
+		meta = modmeta.ParseFromZip(&zr.Reader)
+		iconData = modmeta.IconBytes(&zr.Reader, meta)
+		_ = zr.Close()
+	}
+
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return "", "", "", 0, err
+		return "", "", "", 0, meta, nil, err
 	}
 	if _, err := s.files.Put(ctx, storage.Object{
 		Key:         key,
@@ -177,9 +231,9 @@ func (s *Service) storeFile(ctx context.Context, r io.Reader) (key, sha1sum, sha
 		ContentType: "application/octet-stream",
 		Body:        tmp,
 	}); err != nil {
-		return "", "", "", 0, err
+		return "", "", "", 0, meta, nil, err
 	}
-	return key, sha1sum, sha512sum, size, nil
+	return key, sha1sum, sha512sum, size, meta, iconData, nil
 }
 
 // SearchResult 是列表/搜索结果。
@@ -206,18 +260,54 @@ func (s *Service) Search(ctx context.Context, q string, f Filter, limit, offset 
 		if err != nil {
 			return SearchResult{}, err
 		}
+		for i := range projects {
+			s.fillIconURL(&projects[i])
+		}
 		return SearchResult{Hits: projects, Offset: offset, Limit: limit, TotalHits: int64(len(projects))}, nil
 	}
 	projects, total, err := s.store.Search(ctx, q, f, limit, offset)
 	if err != nil {
 		return SearchResult{}, err
 	}
+	for i := range projects {
+		s.fillIconURL(&projects[i])
+	}
 	return SearchResult{Hits: projects, Offset: offset, Limit: limit, TotalHits: total}, nil
 }
 
 // GetProject 按 id/slug 获取项目（含版本与文件 URL）。
 func (s *Service) GetProject(ctx context.Context, idOrSlug string) (*Project, error) {
-	return s.store.GetProject(ctx, idOrSlug)
+	p, err := s.store.GetProject(ctx, idOrSlug)
+	if err != nil {
+		return nil, err
+	}
+	return s.fillIconURL(p), nil
+}
+
+// fillIconURL 由存储键派生 icon 的对外 URL。
+func (s *Service) fillIconURL(p *Project) *Project {
+	if p != nil && p.IconKey != "" && p.IconURL == "" {
+		p.IconURL = s.baseURL + "/api/mods/" + p.ID + "/icon"
+	}
+	return p
+}
+
+func containsStr(list []string, v string) bool {
+	for _, s := range list {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+func anyOverlap(a, b []string) bool {
+	for _, x := range a {
+		if containsStr(b, x) {
+			return true
+		}
+	}
+	return false
 }
 
 // Versions 返回某项目的版本（文件 URL 已补全）。
@@ -426,7 +516,7 @@ func (s *Service) UserAddVersion(ctx context.Context, u *User, in VersionInput) 
 	if in.VersionType == "" {
 		in.VersionType = "release"
 	}
-	storageKey, sha1sum, sha512sum, size, err := s.storeFile(ctx, in.Data)
+	storageKey, sha1sum, sha512sum, size, _, _, err := s.storeFile(ctx, in.Data)
 	if err != nil {
 		return nil, err
 	}

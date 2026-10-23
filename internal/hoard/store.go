@@ -78,6 +78,10 @@ type Project struct {
 	ServerSide   string   `json:"server_side"`
 	Status       string   `json:"status"`
 	TeamID       string   `json:"team"`
+	License      string   `json:"license,omitempty"`
+	IconURL      string   `json:"icon_url,omitempty"`
+	IconKey      string   `json:"-"`
+	MetaFlags    []string `json:"metadata_flags,omitempty"`
 	Downloads    int64    `json:"downloads"`
 	Follows      int64    `json:"follows"`
 	Published    string   `json:"published"`
@@ -124,6 +128,8 @@ type NewProject struct {
 	Loaders      []string
 	GameVersions []string
 	Categories   []string
+	License      string
+	MetaFlags    []string
 }
 
 // NewVersion 是新建版本的输入。
@@ -193,6 +199,7 @@ type Store interface {
 	ListUserTeams(ctx context.Context, userSub string) ([]UserTeam, error)
 	SetProjectTeam(ctx context.Context, projectID, teamID string) error
 	ProjectTeam(ctx context.Context, projectID string) (string, error)
+	SetProjectIcon(ctx context.Context, projectID, iconKey string) error
 
 	// 个人访问令牌（tokenHash 为 sha256 hex；明文只在创建时返回一次）
 	CreatePAT(ctx context.Context, userSub, name, tokenHash string, scopes []string, expires *time.Time) (id string, err error)

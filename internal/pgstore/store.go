@@ -54,6 +54,8 @@ func (s *Store) CreateProject(ctx context.Context, p hoard.NewProject) (*hoard.P
 		Loaders:      nonNil(p.Loaders),
 		GameVersions: nonNil(p.GameVersions),
 		Categories:   nonNil(p.Categories),
+		License:      p.License,
+		MetaFlags:    nonNil(p.MetaFlags),
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -269,7 +271,7 @@ func ts(t pgtype.Timestamptz) string {
 	return t.Time.Format(time.RFC3339)
 }
 
-func toProject(id, slug, title, description, body, projectType, clientSide, serverSide, status, teamID string, downloads, follows int64, loaders, gameVersions, categories []string, publishedAt pgtype.Timestamptz) *hoard.Project {
+func toProject(id, slug, title, description, body, projectType, clientSide, serverSide, status, teamID, license, iconKey string, metaFlags []string, downloads, follows int64, loaders, gameVersions, categories []string, publishedAt pgtype.Timestamptz) *hoard.Project {
 	return &hoard.Project{
 		ID:           id,
 		Slug:         slug,
@@ -281,6 +283,9 @@ func toProject(id, slug, title, description, body, projectType, clientSide, serv
 		ServerSide:   serverSide,
 		Status:       status,
 		TeamID:       teamID,
+		License:      license,
+		IconKey:      iconKey,
+		MetaFlags:    metaFlags,
 		Downloads:    downloads,
 		Follows:      follows,
 		Published:    ts(publishedAt),
@@ -291,19 +296,19 @@ func toProject(id, slug, title, description, body, projectType, clientSide, serv
 }
 
 func projectFromRow(r db.CreateProjectRow) *hoard.Project {
-	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
+	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.License, r.IconKey, r.MetaFlags, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
 }
 
 func projectFromGetRow(r db.GetProjectByIDOrSlugRow) *hoard.Project {
-	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
+	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.License, r.IconKey, r.MetaFlags, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
 }
 
 func projectFromIDsRow(r db.GetProjectsByIDsRow) *hoard.Project {
-	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
+	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.License, r.IconKey, r.MetaFlags, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
 }
 
 func projectFromSearchRow(r db.SearchProjectsRow) *hoard.Project {
-	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
+	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.License, r.IconKey, r.MetaFlags, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
 }
 
 func versionFromRow(r db.CreateVersionRow) *hoard.Version {
@@ -489,6 +494,17 @@ func (s *Store) ProjectTeam(ctx context.Context, projectID string) (string, erro
 		return "", err
 	}
 	return teamID, nil
+}
+
+func (s *Store) SetProjectIcon(ctx context.Context, projectID, iconKey string) error {
+	n, err := s.q.SetProjectIcon(ctx, db.SetProjectIconParams{ID: projectID, IconKey: iconKey})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return hoard.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) CreatePAT(ctx context.Context, userSub, name, tokenHash string, scopes []string, expires *time.Time) (string, error) {

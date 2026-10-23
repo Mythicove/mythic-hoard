@@ -48,11 +48,13 @@ func (s *Service) Register(r chi.Router, adminToken string) {
 
 	r.Get("/api/mods", s.handleSearch)
 	r.Get("/api/mods/{id}", s.handleGetProject)
+	r.Get("/api/mods/{id}/icon", s.handleIcon)
 	r.Get("/api/mods/{id}/download", s.handleDownload)
 	r.Get("/api/mods/{id}/version/{vid}/file/{fid}", s.handleFile)
 
 	r.Get("/v2/search", s.handleSearch)
 	r.Get("/v2/project/{id}", s.handleGetProject)
+	r.Get("/v2/project/{id}/icon", s.handleIcon)
 	r.Get("/v2/project/{id}/version", s.handleProjectVersions)
 	r.Get("/v2/version/{id}", s.handleGetVersion)
 	r.Get("/v2/project/{id}/version/{vid}/mrpack", s.handleMrpack)
@@ -126,6 +128,24 @@ func (s *Service) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
+}
+
+// handleIcon 直出项目 icon（jar 内解析所得；无 icon 时 404）。
+func (s *Service) handleIcon(w http.ResponseWriter, r *http.Request) {
+	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
+	if err != nil || p.IconKey == "" {
+		http.NotFound(w, r)
+		return
+	}
+	rc, err := s.files.Get(r.Context(), p.IconKey)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer rc.Close()
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = io.Copy(w, rc)
 }
 
 func (s *Service) handleDownload(w http.ResponseWriter, r *http.Request) {

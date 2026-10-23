@@ -99,6 +99,8 @@ func (s *MemoryStore) CreateProject(_ context.Context, p NewProject) (*Project, 
 		ClientSide:   p.ClientSide,
 		ServerSide:   p.ServerSide,
 		Status:       p.Status,
+		License:      p.License,
+		MetaFlags:    p.MetaFlags,
 		Loaders:      p.Loaders,
 		GameVersions: p.GameVersions,
 		Categories:   p.Categories,
@@ -495,6 +497,17 @@ func (s *MemoryStore) ProjectTeam(_ context.Context, projectID string) (string, 
 		return "", ErrNotFound
 	}
 	return p.TeamID, nil
+}
+
+func (s *MemoryStore) SetProjectIcon(_ context.Context, projectID, iconKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		return ErrNotFound
+	}
+	p.IconKey = iconKey
+	return nil
 }
 
 func (s *MemoryStore) CreatePAT(_ context.Context, userSub, name, tokenHash string, scopes []string, expires *time.Time) (string, error) {

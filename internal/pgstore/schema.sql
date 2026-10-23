@@ -14,6 +14,9 @@ CREATE TABLE projects (
     game_versions TEXT[] NOT NULL DEFAULT '{}',
     categories    TEXT[] NOT NULL DEFAULT '{}',
     team_id       TEXT,
+    license       TEXT NOT NULL DEFAULT '',
+    icon_key      TEXT NOT NULL DEFAULT '',
+    meta_flags    TEXT[] NOT NULL DEFAULT '{}',
     published_at  TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );

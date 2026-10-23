@@ -1,18 +1,21 @@
 -- name: CreateProject :one
-INSERT INTO projects (slug, title, description, body, project_type, client_side, server_side, status, loaders, game_versions, categories, published_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
-RETURNING id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id;
+INSERT INTO projects (slug, title, description, body, project_type, client_side, server_side, status, loaders, game_versions, categories, published_at, license, meta_flags)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), $12, $13)
+RETURNING id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags;
+
+-- name: SetProjectIcon :execrows
+UPDATE projects SET icon_key = $2 WHERE id = $1;
 
 -- name: GetProjectByIDOrSlug :one
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
 FROM projects WHERE id = $1 OR slug = $1 LIMIT 1;
 
 -- name: GetProjectsByIDs :many
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
 FROM projects WHERE id = ANY(@ids::text[]);
 
 -- name: SearchProjects :many
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
 FROM projects
 WHERE ($1::text = '' OR title ILIKE '%' || $1::text || '%' OR description ILIKE '%' || $1::text || '%')
   AND (cardinality($2::text[]) = 0 OR loaders && $2::text[])

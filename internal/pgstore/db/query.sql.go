@@ -152,9 +152,9 @@ func (q *Queries) CreatePAT(ctx context.Context, arg CreatePATParams) (string, e
 }
 
 const createProject = `-- name: CreateProject :one
-INSERT INTO projects (slug, title, description, body, project_type, client_side, server_side, status, loaders, game_versions, categories, published_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
-RETURNING id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
+INSERT INTO projects (slug, title, description, body, project_type, client_side, server_side, status, loaders, game_versions, categories, published_at, license, meta_flags)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), $12, $13)
+RETURNING id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
 `
 
 type CreateProjectParams struct {
@@ -169,6 +169,8 @@ type CreateProjectParams struct {
 	Loaders      []string
 	GameVersions []string
 	Categories   []string
+	License      string
+	MetaFlags    []string
 }
 
 type CreateProjectRow struct {
@@ -188,6 +190,9 @@ type CreateProjectRow struct {
 	Categories   []string
 	PublishedAt  pgtype.Timestamptz
 	TeamID       pgtype.Text
+	License      string
+	IconKey      string
+	MetaFlags    []string
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (CreateProjectRow, error) {
@@ -203,6 +208,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (C
 		arg.Loaders,
 		arg.GameVersions,
 		arg.Categories,
+		arg.License,
+		arg.MetaFlags,
 	)
 	var i CreateProjectRow
 	err := row.Scan(
@@ -222,6 +229,9 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (C
 		&i.Categories,
 		&i.PublishedAt,
 		&i.TeamID,
+		&i.License,
+		&i.IconKey,
+		&i.MetaFlags,
 	)
 	return i, err
 }
@@ -390,7 +400,7 @@ func (q *Queries) GetPATByHash(ctx context.Context, tokenHash string) (GetPATByH
 }
 
 const getProjectByIDOrSlug = `-- name: GetProjectByIDOrSlug :one
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
 FROM projects WHERE id = $1 OR slug = $1 LIMIT 1
 `
 
@@ -411,6 +421,9 @@ type GetProjectByIDOrSlugRow struct {
 	Categories   []string
 	PublishedAt  pgtype.Timestamptz
 	TeamID       pgtype.Text
+	License      string
+	IconKey      string
+	MetaFlags    []string
 }
 
 func (q *Queries) GetProjectByIDOrSlug(ctx context.Context, id string) (GetProjectByIDOrSlugRow, error) {
@@ -433,6 +446,9 @@ func (q *Queries) GetProjectByIDOrSlug(ctx context.Context, id string) (GetProje
 		&i.Categories,
 		&i.PublishedAt,
 		&i.TeamID,
+		&i.License,
+		&i.IconKey,
+		&i.MetaFlags,
 	)
 	return i, err
 }
@@ -449,7 +465,7 @@ func (q *Queries) GetProjectTeam(ctx context.Context, id string) (string, error)
 }
 
 const getProjectsByIDs = `-- name: GetProjectsByIDs :many
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
 FROM projects WHERE id = ANY($1::text[])
 `
 
@@ -470,6 +486,9 @@ type GetProjectsByIDsRow struct {
 	Categories   []string
 	PublishedAt  pgtype.Timestamptz
 	TeamID       pgtype.Text
+	License      string
+	IconKey      string
+	MetaFlags    []string
 }
 
 func (q *Queries) GetProjectsByIDs(ctx context.Context, ids []string) ([]GetProjectsByIDsRow, error) {
@@ -498,6 +517,9 @@ func (q *Queries) GetProjectsByIDs(ctx context.Context, ids []string) ([]GetProj
 			&i.Categories,
 			&i.PublishedAt,
 			&i.TeamID,
+			&i.License,
+			&i.IconKey,
+			&i.MetaFlags,
 		); err != nil {
 			return nil, err
 		}
@@ -938,7 +960,7 @@ func (q *Queries) RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberPara
 }
 
 const searchProjects = `-- name: SearchProjects :many
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
 FROM projects
 WHERE ($1::text = '' OR title ILIKE '%' || $1::text || '%' OR description ILIKE '%' || $1::text || '%')
   AND (cardinality($2::text[]) = 0 OR loaders && $2::text[])
@@ -978,6 +1000,9 @@ type SearchProjectsRow struct {
 	Categories   []string
 	PublishedAt  pgtype.Timestamptz
 	TeamID       pgtype.Text
+	License      string
+	IconKey      string
+	MetaFlags    []string
 }
 
 func (q *Queries) SearchProjects(ctx context.Context, arg SearchProjectsParams) ([]SearchProjectsRow, error) {
@@ -1015,6 +1040,9 @@ func (q *Queries) SearchProjects(ctx context.Context, arg SearchProjectsParams) 
 			&i.Categories,
 			&i.PublishedAt,
 			&i.TeamID,
+			&i.License,
+			&i.IconKey,
+			&i.MetaFlags,
 		); err != nil {
 			return nil, err
 		}
@@ -1024,6 +1052,23 @@ func (q *Queries) SearchProjects(ctx context.Context, arg SearchProjectsParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const setProjectIcon = `-- name: SetProjectIcon :execrows
+UPDATE projects SET icon_key = $2 WHERE id = $1
+`
+
+type SetProjectIconParams struct {
+	ID      string
+	IconKey string
+}
+
+func (q *Queries) SetProjectIcon(ctx context.Context, arg SetProjectIconParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setProjectIcon, arg.ID, arg.IconKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setProjectTeam = `-- name: SetProjectTeam :execrows

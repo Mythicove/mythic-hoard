@@ -1,3 +1,5 @@
+github.com/BurntSushi/toml v1.6.0 h1:dRaEfpa2VI55EwlIW72hMRHdWouJeRF7TPYhI+AUQjk=
+github.com/BurntSushi/toml v1.6.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/Mythicove/shared v0.1.1 h1:BmG73tGLJb3KehVLNvaDD52v3akG7znRQHER8u+gMB0=
 github.com/Mythicove/shared v0.1.1/go.mod h1:QYffi5FeKR2E3CqSGP9sADspj1S+Nv8C1+Do1SvD3wQ=
 github.com/andybalholm/brotli v1.2.6 h1:ftYnfj6usCp+UGV5kSJ3+chpMQgU+gJf/AxsUQ52REI=

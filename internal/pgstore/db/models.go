@@ -59,6 +59,9 @@ type Projects struct {
 	GameVersions []string
 	Categories   []string
 	TeamID       pgtype.Text
+	License      string
+	IconKey      string
+	MetaFlags    []string
 	PublishedAt  pgtype.Timestamptz
 	CreatedAt    pgtype.Timestamptz
 }
