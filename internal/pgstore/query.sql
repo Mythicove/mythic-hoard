@@ -1,18 +1,18 @@
 -- name: CreateProject :one
 INSERT INTO projects (slug, title, description, body, project_type, client_side, server_side, status, loaders, game_versions, categories, published_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
-RETURNING id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at;
+RETURNING id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id;
 
 -- name: GetProjectByIDOrSlug :one
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
 FROM projects WHERE id = $1 OR slug = $1 LIMIT 1;
 
 -- name: GetProjectsByIDs :many
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
 FROM projects WHERE id = ANY(@ids::text[]);
 
 -- name: SearchProjects :many
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
 FROM projects
 WHERE ($1::text = '' OR title ILIKE '%' || $1::text || '%' OR description ILIKE '%' || $1::text || '%')
   AND (cardinality($2::text[]) = 0 OR loaders && $2::text[])
@@ -109,3 +109,56 @@ DELETE FROM sessions WHERE id = $1;
 
 -- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at <= now();
+
+-- name: CreateTeam :one
+INSERT INTO teams (name) VALUES ($1) RETURNING id;
+
+-- name: AddTeamMember :execrows
+INSERT INTO team_members (team_id, user_sub, role) VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_sub) DO UPDATE SET role = EXCLUDED.role;
+
+-- name: RemoveTeamMember :execrows
+DELETE FROM team_members WHERE team_id = $1 AND user_sub = $2;
+
+-- name: GetTeamMember :one
+SELECT m.team_id, m.user_sub, COALESCE(u.username, '')::text AS username, m.role, m.created_at
+FROM team_members m LEFT JOIN users u ON u.sub = m.user_sub
+WHERE m.team_id = $1 AND m.user_sub = $2;
+
+-- name: ListTeamMembers :many
+SELECT m.team_id, m.user_sub, COALESCE(u.username, '')::text AS username, m.role, m.created_at
+FROM team_members m LEFT JOIN users u ON u.sub = m.user_sub
+WHERE m.team_id = $1 ORDER BY m.created_at ASC;
+
+-- name: ListUserTeams :many
+SELECT m.team_id, COALESCE(tm.name, '')::text AS name, m.role, m.created_at
+FROM team_members m JOIN teams tm ON tm.id = m.team_id
+WHERE m.user_sub = $1 ORDER BY m.created_at ASC;
+
+-- name: CountTeamMembers :one
+SELECT count(*) FROM team_members WHERE team_id = $1;
+
+-- name: SetProjectTeam :execrows
+UPDATE projects SET team_id = $2 WHERE id = $1;
+
+-- name: GetProjectTeam :one
+SELECT COALESCE(team_id, '')::text AS team_id FROM projects WHERE id = $1;
+
+-- name: CreatePAT :one
+INSERT INTO personal_access_tokens (user_sub, name, token_hash, scopes, expires_at)
+VALUES ($1, $2, $3, $4, $5) RETURNING id;
+
+-- name: ListPATs :many
+SELECT id, user_sub, name, scopes, expires_at, last_used, created_at
+FROM personal_access_tokens WHERE user_sub = $1 ORDER BY created_at DESC;
+
+-- name: GetPATByHash :one
+SELECT p.id, p.user_sub, p.name, p.scopes, p.expires_at, u.username, u.role
+FROM personal_access_tokens p JOIN users u ON u.sub = p.user_sub
+WHERE p.token_hash = $1 AND (p.expires_at IS NULL OR p.expires_at > now());
+
+-- name: TouchPAT :exec
+UPDATE personal_access_tokens SET last_used = now() WHERE id = $1;
+
+-- name: DeletePAT :execrows
+DELETE FROM personal_access_tokens WHERE id = $1 AND user_sub = $2;

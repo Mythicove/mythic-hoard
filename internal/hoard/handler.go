@@ -20,6 +20,21 @@ func (s *Service) Register(r chi.Router, adminToken string) {
 	r.Post("/auth/logout", s.HandleLogout)
 	r.Get("/auth/me", s.HandleMe)
 
+	// 用户资源（需登录：会话 cookie 或 PAT）
+	r.Group(func(r chi.Router) {
+		r.Use(RequireUser())
+		r.Post("/api/team", s.handleCreateTeam)
+		r.Get("/api/user/teams", s.handleListMyTeams)
+		r.Get("/api/user/pats", s.handleListPATs)
+		r.Post("/api/user/pats", s.handleCreatePAT)
+		r.Delete("/api/user/pats/{id}", s.handleDeletePAT)
+		r.Post("/api/team/{id}/members", s.handleAddTeamMember)
+		r.Delete("/api/team/{id}/members/{sub}", s.handleRemoveTeamMember)
+	})
+
+	// 团队成员列表公开（与 Modrinth 一致）
+	r.Get("/api/team/{id}/members", s.handleListTeamMembers)
+
 	r.Group(func(r chi.Router) {
 		r.Use(Admin(adminToken))
 		r.Post("/api/mods", s.handleUpload)

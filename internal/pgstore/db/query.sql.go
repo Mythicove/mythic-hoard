@@ -11,6 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addTeamMember = `-- name: AddTeamMember :execrows
+INSERT INTO team_members (team_id, user_sub, role) VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_sub) DO UPDATE SET role = EXCLUDED.role
+`
+
+type AddTeamMemberParams struct {
+	TeamID  string
+	UserSub string
+	Role    string
+}
+
+func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, addTeamMember, arg.TeamID, arg.UserSub, arg.Role)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countSearchProjects = `-- name: CountSearchProjects :one
 SELECT count(*) FROM projects
 WHERE ($1::text = '' OR title ILIKE '%' || $1::text || '%' OR description ILIKE '%' || $1::text || '%')
@@ -39,6 +58,17 @@ func (q *Queries) CountSearchProjects(ctx context.Context, arg CountSearchProjec
 		arg.Column5,
 		arg.Column6,
 	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTeamMembers = `-- name: CountTeamMembers :one
+SELECT count(*) FROM team_members WHERE team_id = $1
+`
+
+func (q *Queries) CountTeamMembers(ctx context.Context, teamID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countTeamMembers, teamID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -95,10 +125,36 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (CreateF
 	return i, err
 }
 
+const createPAT = `-- name: CreatePAT :one
+INSERT INTO personal_access_tokens (user_sub, name, token_hash, scopes, expires_at)
+VALUES ($1, $2, $3, $4, $5) RETURNING id
+`
+
+type CreatePATParams struct {
+	UserSub   string
+	Name      string
+	TokenHash string
+	Scopes    []string
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreatePAT(ctx context.Context, arg CreatePATParams) (string, error) {
+	row := q.db.QueryRow(ctx, createPAT,
+		arg.UserSub,
+		arg.Name,
+		arg.TokenHash,
+		arg.Scopes,
+		arg.ExpiresAt,
+	)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (slug, title, description, body, project_type, client_side, server_side, status, loaders, game_versions, categories, published_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
-RETURNING id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at
+RETURNING id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
 `
 
 type CreateProjectParams struct {
@@ -131,6 +187,7 @@ type CreateProjectRow struct {
 	GameVersions []string
 	Categories   []string
 	PublishedAt  pgtype.Timestamptz
+	TeamID       pgtype.Text
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (CreateProjectRow, error) {
@@ -164,6 +221,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (C
 		&i.GameVersions,
 		&i.Categories,
 		&i.PublishedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
@@ -181,6 +239,17 @@ type CreateSessionParams struct {
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
 	_, err := q.db.Exec(ctx, createSession, arg.ID, arg.UserSub, arg.ExpiresAt)
 	return err
+}
+
+const createTeam = `-- name: CreateTeam :one
+INSERT INTO teams (name) VALUES ($1) RETURNING id
+`
+
+func (q *Queries) CreateTeam(ctx context.Context, name string) (string, error) {
+	row := q.db.QueryRow(ctx, createTeam, name)
+	var id string
+	err := row.Scan(&id)
+	return id, err
 }
 
 const createVersion = `-- name: CreateVersion :one
@@ -248,6 +317,23 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const deletePAT = `-- name: DeletePAT :execrows
+DELETE FROM personal_access_tokens WHERE id = $1 AND user_sub = $2
+`
+
+type DeletePATParams struct {
+	ID      string
+	UserSub string
+}
+
+func (q *Queries) DeletePAT(ctx context.Context, arg DeletePATParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePAT, arg.ID, arg.UserSub)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteProject = `-- name: DeleteProject :execrows
 DELETE FROM projects WHERE id = $1
 `
@@ -272,8 +358,39 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const getPATByHash = `-- name: GetPATByHash :one
+SELECT p.id, p.user_sub, p.name, p.scopes, p.expires_at, u.username, u.role
+FROM personal_access_tokens p JOIN users u ON u.sub = p.user_sub
+WHERE p.token_hash = $1 AND (p.expires_at IS NULL OR p.expires_at > now())
+`
+
+type GetPATByHashRow struct {
+	ID        string
+	UserSub   string
+	Name      string
+	Scopes    []string
+	ExpiresAt pgtype.Timestamptz
+	Username  string
+	Role      string
+}
+
+func (q *Queries) GetPATByHash(ctx context.Context, tokenHash string) (GetPATByHashRow, error) {
+	row := q.db.QueryRow(ctx, getPATByHash, tokenHash)
+	var i GetPATByHashRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserSub,
+		&i.Name,
+		&i.Scopes,
+		&i.ExpiresAt,
+		&i.Username,
+		&i.Role,
+	)
+	return i, err
+}
+
 const getProjectByIDOrSlug = `-- name: GetProjectByIDOrSlug :one
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
 FROM projects WHERE id = $1 OR slug = $1 LIMIT 1
 `
 
@@ -293,6 +410,7 @@ type GetProjectByIDOrSlugRow struct {
 	GameVersions []string
 	Categories   []string
 	PublishedAt  pgtype.Timestamptz
+	TeamID       pgtype.Text
 }
 
 func (q *Queries) GetProjectByIDOrSlug(ctx context.Context, id string) (GetProjectByIDOrSlugRow, error) {
@@ -314,12 +432,24 @@ func (q *Queries) GetProjectByIDOrSlug(ctx context.Context, id string) (GetProje
 		&i.GameVersions,
 		&i.Categories,
 		&i.PublishedAt,
+		&i.TeamID,
 	)
 	return i, err
 }
 
+const getProjectTeam = `-- name: GetProjectTeam :one
+SELECT COALESCE(team_id, '')::text AS team_id FROM projects WHERE id = $1
+`
+
+func (q *Queries) GetProjectTeam(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRow(ctx, getProjectTeam, id)
+	var team_id string
+	err := row.Scan(&team_id)
+	return team_id, err
+}
+
 const getProjectsByIDs = `-- name: GetProjectsByIDs :many
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
 FROM projects WHERE id = ANY($1::text[])
 `
 
@@ -339,6 +469,7 @@ type GetProjectsByIDsRow struct {
 	GameVersions []string
 	Categories   []string
 	PublishedAt  pgtype.Timestamptz
+	TeamID       pgtype.Text
 }
 
 func (q *Queries) GetProjectsByIDs(ctx context.Context, ids []string) ([]GetProjectsByIDsRow, error) {
@@ -366,6 +497,7 @@ func (q *Queries) GetProjectsByIDs(ctx context.Context, ids []string) ([]GetProj
 			&i.GameVersions,
 			&i.Categories,
 			&i.PublishedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -405,6 +537,38 @@ func (q *Queries) GetSession(ctx context.Context, id string) (GetSessionRow, err
 		&i.Email,
 		&i.AvatarUrl,
 		&i.Role,
+	)
+	return i, err
+}
+
+const getTeamMember = `-- name: GetTeamMember :one
+SELECT m.team_id, m.user_sub, COALESCE(u.username, '')::text AS username, m.role, m.created_at
+FROM team_members m LEFT JOIN users u ON u.sub = m.user_sub
+WHERE m.team_id = $1 AND m.user_sub = $2
+`
+
+type GetTeamMemberParams struct {
+	TeamID  string
+	UserSub string
+}
+
+type GetTeamMemberRow struct {
+	TeamID    string
+	UserSub   string
+	Username  string
+	Role      string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (GetTeamMemberRow, error) {
+	row := q.db.QueryRow(ctx, getTeamMember, arg.TeamID, arg.UserSub)
+	var i GetTeamMemberRow
+	err := row.Scan(
+		&i.TeamID,
+		&i.UserSub,
+		&i.Username,
+		&i.Role,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -588,6 +752,127 @@ func (q *Queries) ListLoaders(ctx context.Context) ([]string, error) {
 	return items, nil
 }
 
+const listPATs = `-- name: ListPATs :many
+SELECT id, user_sub, name, scopes, expires_at, last_used, created_at
+FROM personal_access_tokens WHERE user_sub = $1 ORDER BY created_at DESC
+`
+
+type ListPATsRow struct {
+	ID        string
+	UserSub   string
+	Name      string
+	Scopes    []string
+	ExpiresAt pgtype.Timestamptz
+	LastUsed  pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListPATs(ctx context.Context, userSub string) ([]ListPATsRow, error) {
+	rows, err := q.db.Query(ctx, listPATs, userSub)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPATsRow
+	for rows.Next() {
+		var i ListPATsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserSub,
+			&i.Name,
+			&i.Scopes,
+			&i.ExpiresAt,
+			&i.LastUsed,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamMembers = `-- name: ListTeamMembers :many
+SELECT m.team_id, m.user_sub, COALESCE(u.username, '')::text AS username, m.role, m.created_at
+FROM team_members m LEFT JOIN users u ON u.sub = m.user_sub
+WHERE m.team_id = $1 ORDER BY m.created_at ASC
+`
+
+type ListTeamMembersRow struct {
+	TeamID    string
+	UserSub   string
+	Username  string
+	Role      string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListTeamMembers(ctx context.Context, teamID string) ([]ListTeamMembersRow, error) {
+	rows, err := q.db.Query(ctx, listTeamMembers, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTeamMembersRow
+	for rows.Next() {
+		var i ListTeamMembersRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.UserSub,
+			&i.Username,
+			&i.Role,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserTeams = `-- name: ListUserTeams :many
+SELECT m.team_id, COALESCE(tm.name, '')::text AS name, m.role, m.created_at
+FROM team_members m JOIN teams tm ON tm.id = m.team_id
+WHERE m.user_sub = $1 ORDER BY m.created_at ASC
+`
+
+type ListUserTeamsRow struct {
+	TeamID    string
+	Name      string
+	Role      string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListUserTeams(ctx context.Context, userSub string) ([]ListUserTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listUserTeams, userSub)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUserTeamsRow
+	for rows.Next() {
+		var i ListUserTeamsRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.Name,
+			&i.Role,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVersions = `-- name: ListVersions :many
 SELECT id, project_id, name, version_number, version_type, changelog, loaders, game_versions, date_published
 FROM versions WHERE project_id = $1 ORDER BY date_published DESC
@@ -635,8 +920,25 @@ func (q *Queries) ListVersions(ctx context.Context, projectID string) ([]ListVer
 	return items, nil
 }
 
+const removeTeamMember = `-- name: RemoveTeamMember :execrows
+DELETE FROM team_members WHERE team_id = $1 AND user_sub = $2
+`
+
+type RemoveTeamMemberParams struct {
+	TeamID  string
+	UserSub string
+}
+
+func (q *Queries) RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeTeamMember, arg.TeamID, arg.UserSub)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const searchProjects = `-- name: SearchProjects :many
-SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at
+SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id
 FROM projects
 WHERE ($1::text = '' OR title ILIKE '%' || $1::text || '%' OR description ILIKE '%' || $1::text || '%')
   AND (cardinality($2::text[]) = 0 OR loaders && $2::text[])
@@ -675,6 +977,7 @@ type SearchProjectsRow struct {
 	GameVersions []string
 	Categories   []string
 	PublishedAt  pgtype.Timestamptz
+	TeamID       pgtype.Text
 }
 
 func (q *Queries) SearchProjects(ctx context.Context, arg SearchProjectsParams) ([]SearchProjectsRow, error) {
@@ -711,6 +1014,7 @@ func (q *Queries) SearchProjects(ctx context.Context, arg SearchProjectsParams) 
 			&i.GameVersions,
 			&i.Categories,
 			&i.PublishedAt,
+			&i.TeamID,
 		); err != nil {
 			return nil, err
 		}
@@ -720,6 +1024,23 @@ func (q *Queries) SearchProjects(ctx context.Context, arg SearchProjectsParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const setProjectTeam = `-- name: SetProjectTeam :execrows
+UPDATE projects SET team_id = $2 WHERE id = $1
+`
+
+type SetProjectTeamParams struct {
+	ID     string
+	TeamID pgtype.Text
+}
+
+func (q *Queries) SetProjectTeam(ctx context.Context, arg SetProjectTeamParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setProjectTeam, arg.ID, arg.TeamID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setUserRole = `-- name: SetUserRole :execrows
@@ -737,6 +1058,15 @@ func (q *Queries) SetUserRole(ctx context.Context, arg SetUserRoleParams) (int64
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const touchPAT = `-- name: TouchPAT :exec
+UPDATE personal_access_tokens SET last_used = now() WHERE id = $1
+`
+
+func (q *Queries) TouchPAT(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, touchPAT, id)
+	return err
 }
 
 const updateProjectStatus = `-- name: UpdateProjectStatus :exec

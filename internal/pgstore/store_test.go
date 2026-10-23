@@ -186,3 +186,94 @@ func TestIdentityPG(t *testing.T) {
 		t.Fatalf("deleted: %v", err)
 	}
 }
+
+func TestTeamsAndPATPG(t *testing.T) {
+	dsn := os.Getenv("HOARD_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HOARD_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	if err := migrate.Run(dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	stamp := time.Now().Format("150405.000")
+	owner, dev := "it-owner-"+stamp, "it-dev-"+stamp
+	_, _ = st.pool.Exec(ctx, `DELETE FROM users WHERE sub IN ($1,$2)`, owner, dev)
+	if err := st.UpsertUser(ctx, hoard.User{Sub: owner, Username: "Owner", Role: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertUser(ctx, hoard.User{Sub: dev, Username: "Dev", Role: "user"}); err != nil {
+		t.Fatal(err)
+	}
+
+	teamID, err := st.CreateTeam(ctx, "PG Team", owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := st.GetTeamMember(ctx, teamID, owner)
+	if err != nil || m.Role != "owner" || m.Username != "Owner" {
+		t.Fatalf("owner: %+v err=%v", m, err)
+	}
+	if err := st.AddTeamMember(ctx, teamID, dev, "member"); err != nil {
+		t.Fatal(err)
+	}
+	members, err := st.ListTeamMembers(ctx, teamID)
+	if err != nil || len(members) != 2 {
+		t.Fatalf("members: %+v err=%v", members, err)
+	}
+	teams, _ := st.ListUserTeams(ctx, dev)
+	if len(teams) != 1 || teams[0].Name != "PG Team" {
+		t.Fatalf("user teams: %+v", teams)
+	}
+	if err := st.RemoveTeamMember(ctx, teamID, dev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetTeamMember(ctx, teamID, dev); err != hoard.ErrNotFound {
+		t.Fatalf("removed: %v", err)
+	}
+
+	var pid string
+	if err := st.pool.QueryRow(ctx, `SELECT id FROM projects LIMIT 1`).Scan(&pid); err == nil {
+		if err := st.SetProjectTeam(ctx, pid, teamID); err != nil {
+			t.Fatal(err)
+		}
+		got, err := st.ProjectTeam(ctx, pid)
+		if err != nil || got != teamID {
+			t.Fatalf("project team: %q err=%v", got, err)
+		}
+		p, err := st.GetProject(ctx, pid)
+		if err != nil || p.TeamID != teamID {
+			t.Fatalf("project.TeamID: %+v err=%v", p, err)
+		}
+	}
+	if err := st.SetProjectTeam(ctx, "nope", teamID); err != hoard.ErrNotFound {
+		t.Fatalf("set team missing project: %v", err)
+	}
+
+	hash := "hash-" + stamp
+	exp := time.Now().Add(time.Hour)
+	id, err := st.CreatePAT(ctx, owner, "ci", hash, []string{"UPLOAD"}, &exp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := st.ValidatePAT(ctx, hash)
+	if err != nil || sess.User.Sub != owner || sess.PATID != id || sess.Scopes[0] != "UPLOAD" {
+		t.Fatalf("validate: %+v err=%v", sess, err)
+	}
+	pats, _ := st.ListPATs(ctx, owner)
+	if len(pats) != 1 || pats[0].LastUsed == "" {
+		t.Fatalf("list pats: %+v", pats)
+	}
+	if err := st.DeletePAT(ctx, owner, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ValidatePAT(ctx, hash); err != hoard.ErrNotFound {
+		t.Fatalf("deleted pat: %v", err)
+	}
+}

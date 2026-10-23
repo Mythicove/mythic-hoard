@@ -30,6 +30,40 @@ type User struct {
 // IsAdmin 返回是否管理员。
 func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
 
+// TeamMember 是团队成员（username 为投影联查结果）。
+type TeamMember struct {
+	TeamID    string `json:"team_id"`
+	UserSub   string `json:"user_sub"`
+	Username  string `json:"username"`
+	Role      string `json:"role"` // owner | member
+	CreatedAt string `json:"created_at"`
+}
+
+// UserTeam 是用户视角的团队摘要。
+type UserTeam struct {
+	TeamID    string `json:"team_id"`
+	Name      string `json:"name"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"created_at"`
+}
+
+// PAT 是个人访问令牌元数据（永不含明文）。
+type PAT struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Scopes    []string `json:"scopes"`
+	ExpiresAt string   `json:"expires_at,omitempty"`
+	LastUsed  string   `json:"last_used,omitempty"`
+	CreatedAt string   `json:"created_at"`
+}
+
+// PATSession 是 PAT 校验结果（持有人 + scopes）。
+type PATSession struct {
+	User   User
+	PATID  string
+	Scopes []string
+}
+
 // Project 对应 Modrinth 的 project。
 type Project struct {
 	ID           string   `json:"id"`
@@ -41,6 +75,7 @@ type Project struct {
 	ClientSide   string   `json:"client_side"`
 	ServerSide   string   `json:"server_side"`
 	Status       string   `json:"status"`
+	TeamID       string   `json:"team"`
 	Downloads    int64    `json:"downloads"`
 	Follows      int64    `json:"follows"`
 	Published    string   `json:"published"`
@@ -146,4 +181,20 @@ type Store interface {
 	CreateSession(ctx context.Context, id, userSub string, expires time.Time) error
 	SessionUser(ctx context.Context, sessionID string) (*User, error)
 	DeleteSession(ctx context.Context, id string) error
+
+	// 团队（owner 管成员/删项目，member 传版本）
+	CreateTeam(ctx context.Context, name, ownerSub string) (teamID string, err error)
+	AddTeamMember(ctx context.Context, teamID, userSub, role string) error
+	RemoveTeamMember(ctx context.Context, teamID, userSub string) error
+	GetTeamMember(ctx context.Context, teamID, userSub string) (*TeamMember, error)
+	ListTeamMembers(ctx context.Context, teamID string) ([]TeamMember, error)
+	ListUserTeams(ctx context.Context, userSub string) ([]UserTeam, error)
+	SetProjectTeam(ctx context.Context, projectID, teamID string) error
+	ProjectTeam(ctx context.Context, projectID string) (string, error)
+
+	// 个人访问令牌（tokenHash 为 sha256 hex；明文只在创建时返回一次）
+	CreatePAT(ctx context.Context, userSub, name, tokenHash string, scopes []string, expires *time.Time) (id string, err error)
+	ListPATs(ctx context.Context, userSub string) ([]PAT, error)
+	ValidatePAT(ctx context.Context, tokenHash string) (*PATSession, error)
+	DeletePAT(ctx context.Context, userSub, id string) error
 }

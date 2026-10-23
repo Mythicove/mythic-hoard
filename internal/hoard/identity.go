@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Mythicove/mythic-hoard/internal/oidcrp"
@@ -39,11 +40,19 @@ func UserFromContext(ctx context.Context) *User {
 	return u
 }
 
-// SessionAuth 读取会话 cookie 并把用户注入 context（不强制；由端点决定是否要求登录）。
+// SessionAuth 解析登录态并注入 context（不强制；由端点决定是否要求登录）。
+// 两种凭证：会话 cookie（web SSO）或 Bearer 个人访问令牌（mhp_ 前缀，脚本/CI）。
 func (s *Service) SessionAuth() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if c, err := r.Cookie(SessionCookie); err == nil && c.Value != "" {
+			if tok := bearerToken(r); strings.HasPrefix(tok, PATPrefix) {
+				if sess, err := s.store.ValidatePAT(r.Context(), hashPAT(tok)); err == nil {
+					u := sess.User
+					ctx := context.WithValue(r.Context(), userKey{}, &u)
+					ctx = context.WithValue(ctx, scopesKey{}, sess.Scopes)
+					r = r.WithContext(ctx)
+				}
+			} else if c, err := r.Cookie(SessionCookie); err == nil && c.Value != "" {
 				if u, err := s.store.SessionUser(r.Context(), c.Value); err == nil && u != nil {
 					r = r.WithContext(context.WithValue(r.Context(), userKey{}, u))
 				}

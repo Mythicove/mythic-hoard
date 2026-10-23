@@ -20,6 +20,25 @@ type MemoryStore struct {
 	categoriesSet map[string]struct{}
 	users         map[string]*User
 	sessions      map[string]memSession
+	teams         map[string]*memTeam
+	pats          map[string]*memPAT
+}
+
+type memTeam struct {
+	name      string
+	createdAt time.Time
+	members   map[string]*TeamMember // user_sub -> member
+}
+
+type memPAT struct {
+	id       string
+	userSub  string
+	name     string
+	hash     string
+	scopes   []string
+	expires  *time.Time
+	lastUsed time.Time
+	created  time.Time
 }
 
 type memSession struct {
@@ -40,6 +59,8 @@ func NewMemoryStore() *MemoryStore {
 		categoriesSet: map[string]struct{}{},
 		users:         map[string]*User{},
 		sessions:      map[string]memSession{},
+		teams:         map[string]*memTeam{},
+		pats:          map[string]*memPAT{},
 	}
 }
 
@@ -357,5 +378,186 @@ func (s *MemoryStore) DeleteSession(_ context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, id)
+	return nil
+}
+
+// 团队与 PAT（内存实现）。
+
+func (s *MemoryStore) CreateTeam(_ context.Context, name, ownerSub string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[ownerSub]; !ok {
+		return "", ErrNotFound
+	}
+	id := s.nextID("team")
+	now := time.Now().UTC()
+	s.teams[id] = &memTeam{
+		name: name, createdAt: now,
+		members: map[string]*TeamMember{ownerSub: {
+			TeamID: id, UserSub: ownerSub, Username: s.users[ownerSub].Username,
+			Role: "owner", CreatedAt: now.Format(time.RFC3339),
+		}},
+	}
+	return id, nil
+}
+
+func (s *MemoryStore) AddTeamMember(_ context.Context, teamID, userSub, role string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return ErrNotFound
+	}
+	u, ok := s.users[userSub]
+	if !ok {
+		return ErrNotFound
+	}
+	team.members[userSub] = &TeamMember{
+		TeamID: teamID, UserSub: userSub, Username: u.Username,
+		Role: role, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	return nil
+}
+
+func (s *MemoryStore) RemoveTeamMember(_ context.Context, teamID, userSub string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return ErrNotFound
+	}
+	if _, ok := team.members[userSub]; !ok {
+		return ErrNotFound
+	}
+	delete(team.members, userSub)
+	return nil
+}
+
+func (s *MemoryStore) GetTeamMember(_ context.Context, teamID, userSub string) (*TeamMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	m, ok := team.members[userSub]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *m
+	return &cp, nil
+}
+
+func (s *MemoryStore) ListTeamMembers(_ context.Context, teamID string) ([]TeamMember, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	out := make([]TeamMember, 0, len(team.members))
+	for _, m := range team.members {
+		out = append(out, *m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
+	return out, nil
+}
+
+func (s *MemoryStore) ListUserTeams(_ context.Context, userSub string) ([]UserTeam, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []UserTeam{}
+	for id, team := range s.teams {
+		if m, ok := team.members[userSub]; ok {
+			out = append(out, UserTeam{TeamID: id, Name: team.name, Role: m.Role, CreatedAt: m.CreatedAt})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
+	return out, nil
+}
+
+func (s *MemoryStore) SetProjectTeam(_ context.Context, projectID, teamID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		return ErrNotFound
+	}
+	p.TeamID = teamID
+	return nil
+}
+
+func (s *MemoryStore) ProjectTeam(_ context.Context, projectID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p, ok := s.projects[projectID]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return p.TeamID, nil
+}
+
+func (s *MemoryStore) CreatePAT(_ context.Context, userSub, name, tokenHash string, scopes []string, expires *time.Time) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[userSub]; !ok {
+		return "", ErrNotFound
+	}
+	id := s.nextID("pat")
+	s.pats[id] = &memPAT{
+		id: id, userSub: userSub, name: name, hash: tokenHash,
+		scopes: scopes, expires: expires, created: time.Now().UTC(),
+	}
+	return id, nil
+}
+
+func (s *MemoryStore) ListPATs(_ context.Context, userSub string) ([]PAT, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []PAT{}
+	for _, p := range s.pats {
+		if p.userSub != userSub {
+			continue
+		}
+		item := PAT{ID: p.id, Name: p.name, Scopes: p.scopes, CreatedAt: p.created.Format(time.RFC3339)}
+		if p.expires != nil {
+			item.ExpiresAt = p.expires.Format(time.RFC3339)
+		}
+		if !p.lastUsed.IsZero() {
+			item.LastUsed = p.lastUsed.Format(time.RFC3339)
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) ValidatePAT(_ context.Context, tokenHash string) (*PATSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.pats {
+		if p.hash != tokenHash {
+			continue
+		}
+		if p.expires != nil && time.Now().After(*p.expires) {
+			return nil, ErrNotFound
+		}
+		u, ok := s.users[p.userSub]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		p.lastUsed = time.Now().UTC()
+		return &PATSession{User: *u, PATID: p.id, Scopes: p.scopes}, nil
+	}
+	return nil, ErrNotFound
+}
+
+func (s *MemoryStore) DeletePAT(_ context.Context, userSub, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.pats[id]
+	if !ok || p.userSub != userSub {
+		return ErrNotFound
+	}
+	delete(s.pats, id)
 	return nil
 }

@@ -32,6 +32,17 @@ type Loaders struct {
 	Name string
 }
 
+type PersonalAccessTokens struct {
+	ID        string
+	UserSub   string
+	Name      string
+	TokenHash string
+	Scopes    []string
+	ExpiresAt pgtype.Timestamptz
+	LastUsed  pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
 type Projects struct {
 	ID           string
 	Slug         string
@@ -47,6 +58,7 @@ type Projects struct {
 	Loaders      []string
 	GameVersions []string
 	Categories   []string
+	TeamID       pgtype.Text
 	PublishedAt  pgtype.Timestamptz
 	CreatedAt    pgtype.Timestamptz
 }
@@ -55,6 +67,19 @@ type Sessions struct {
 	ID        string
 	UserSub   string
 	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
+type TeamMembers struct {
+	TeamID    string
+	UserSub   string
+	Role      string
+	CreatedAt pgtype.Timestamptz
+}
+
+type Teams struct {
+	ID        string
+	Name      string
 	CreatedAt pgtype.Timestamptz
 }
 

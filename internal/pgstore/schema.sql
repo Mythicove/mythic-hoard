@@ -13,6 +13,7 @@ CREATE TABLE projects (
     loaders       TEXT[] NOT NULL DEFAULT '{}',
     game_versions TEXT[] NOT NULL DEFAULT '{}',
     categories    TEXT[] NOT NULL DEFAULT '{}',
+    team_id       TEXT,
     published_at  TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -72,3 +73,29 @@ CREATE TABLE sessions (
 );
 CREATE INDEX idx_sessions_user ON sessions (user_sub);
 CREATE INDEX idx_sessions_expires ON sessions (expires_at);
+
+CREATE TABLE teams (
+    id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    name       TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE team_members (
+    team_id    TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    user_sub   TEXT NOT NULL REFERENCES users(sub) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'member',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (team_id, user_sub)
+);
+
+CREATE TABLE personal_access_tokens (
+    id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    user_sub   TEXT NOT NULL REFERENCES users(sub) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    scopes     TEXT[] NOT NULL DEFAULT '{}',
+    expires_at TIMESTAMPTZ,
+    last_used  TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_pat_user ON personal_access_tokens (user_sub);

@@ -269,7 +269,7 @@ func ts(t pgtype.Timestamptz) string {
 	return t.Time.Format(time.RFC3339)
 }
 
-func toProject(id, slug, title, description, body, projectType, clientSide, serverSide, status string, downloads, follows int64, loaders, gameVersions, categories []string, publishedAt pgtype.Timestamptz) *hoard.Project {
+func toProject(id, slug, title, description, body, projectType, clientSide, serverSide, status, teamID string, downloads, follows int64, loaders, gameVersions, categories []string, publishedAt pgtype.Timestamptz) *hoard.Project {
 	return &hoard.Project{
 		ID:           id,
 		Slug:         slug,
@@ -280,6 +280,7 @@ func toProject(id, slug, title, description, body, projectType, clientSide, serv
 		ClientSide:   clientSide,
 		ServerSide:   serverSide,
 		Status:       status,
+		TeamID:       teamID,
 		Downloads:    downloads,
 		Follows:      follows,
 		Published:    ts(publishedAt),
@@ -290,19 +291,19 @@ func toProject(id, slug, title, description, body, projectType, clientSide, serv
 }
 
 func projectFromRow(r db.CreateProjectRow) *hoard.Project {
-	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
+	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
 }
 
 func projectFromGetRow(r db.GetProjectByIDOrSlugRow) *hoard.Project {
-	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
+	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
 }
 
 func projectFromIDsRow(r db.GetProjectsByIDsRow) *hoard.Project {
-	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
+	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
 }
 
 func projectFromSearchRow(r db.SearchProjectsRow) *hoard.Project {
-	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
+	return toProject(r.ID, r.Slug, r.Title, r.Description, r.Body, r.ProjectType, r.ClientSide, r.ServerSide, r.Status, r.TeamID.String, r.Downloads, r.Follows, r.Loaders, r.GameVersions, r.Categories, r.PublishedAt)
 }
 
 func versionFromRow(r db.CreateVersionRow) *hoard.Version {
@@ -397,4 +398,147 @@ func (s *Store) SessionUser(ctx context.Context, sessionID string) (*hoard.User,
 func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	_, err := s.q.DeleteSession(ctx, id)
 	return err
+}
+
+// 团队与个人访问令牌。
+
+func (s *Store) CreateTeam(ctx context.Context, name, ownerSub string) (string, error) {
+	id, err := s.q.CreateTeam(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.q.AddTeamMember(ctx, db.AddTeamMemberParams{TeamID: id, UserSub: ownerSub, Role: "owner"}); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (s *Store) AddTeamMember(ctx context.Context, teamID, userSub, role string) error {
+	_, err := s.q.AddTeamMember(ctx, db.AddTeamMemberParams{TeamID: teamID, UserSub: userSub, Role: role})
+	return err
+}
+func (s *Store) RemoveTeamMember(ctx context.Context, teamID, userSub string) error {
+	n, err := s.q.RemoveTeamMember(ctx, db.RemoveTeamMemberParams{TeamID: teamID, UserSub: userSub})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return hoard.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetTeamMember(ctx context.Context, teamID, userSub string) (*hoard.TeamMember, error) {
+	row, err := s.q.GetTeamMember(ctx, db.GetTeamMemberParams{TeamID: teamID, UserSub: userSub})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, hoard.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &hoard.TeamMember{
+		TeamID: row.TeamID, UserSub: row.UserSub, Username: row.Username,
+		Role: row.Role, CreatedAt: ts(row.CreatedAt),
+	}, nil
+}
+
+func (s *Store) ListTeamMembers(ctx context.Context, teamID string) ([]hoard.TeamMember, error) {
+	rows, err := s.q.ListTeamMembers(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hoard.TeamMember, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, hoard.TeamMember{
+			TeamID: r.TeamID, UserSub: r.UserSub, Username: r.Username,
+			Role: r.Role, CreatedAt: ts(r.CreatedAt),
+		})
+	}
+	return out, nil
+}
+
+func (s *Store) ListUserTeams(ctx context.Context, userSub string) ([]hoard.UserTeam, error) {
+	rows, err := s.q.ListUserTeams(ctx, userSub)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hoard.UserTeam, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, hoard.UserTeam{TeamID: r.TeamID, Name: r.Name, Role: r.Role, CreatedAt: ts(r.CreatedAt)})
+	}
+	return out, nil
+}
+
+func (s *Store) SetProjectTeam(ctx context.Context, projectID, teamID string) error {
+	n, err := s.q.SetProjectTeam(ctx, db.SetProjectTeamParams{ID: projectID, TeamID: pgtype.Text{String: teamID, Valid: teamID != ""}})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return hoard.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ProjectTeam(ctx context.Context, projectID string) (string, error) {
+	teamID, err := s.q.GetProjectTeam(ctx, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", hoard.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	return teamID, nil
+}
+
+func (s *Store) CreatePAT(ctx context.Context, userSub, name, tokenHash string, scopes []string, expires *time.Time) (string, error) {
+	var exp pgtype.Timestamptz
+	if expires != nil {
+		exp = pgtype.Timestamptz{Time: *expires, Valid: true}
+	}
+	return s.q.CreatePAT(ctx, db.CreatePATParams{
+		UserSub: userSub, Name: name, TokenHash: tokenHash, Scopes: nonNil(scopes), ExpiresAt: exp,
+	})
+}
+
+func (s *Store) ListPATs(ctx context.Context, userSub string) ([]hoard.PAT, error) {
+	rows, err := s.q.ListPATs(ctx, userSub)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hoard.PAT, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, hoard.PAT{
+			ID: r.ID, Name: r.Name, Scopes: r.Scopes,
+			ExpiresAt: ts(r.ExpiresAt), LastUsed: ts(r.LastUsed), CreatedAt: ts(r.CreatedAt),
+		})
+	}
+	return out, nil
+}
+
+func (s *Store) ValidatePAT(ctx context.Context, tokenHash string) (*hoard.PATSession, error) {
+	row, err := s.q.GetPATByHash(ctx, tokenHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, hoard.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	_ = s.q.TouchPAT(ctx, row.ID)
+	return &hoard.PATSession{
+		User:   hoard.User{Sub: row.UserSub, Username: row.Username, Role: row.Role},
+		PATID:  row.ID,
+		Scopes: row.Scopes,
+	}, nil
+}
+
+func (s *Store) DeletePAT(ctx context.Context, userSub, id string) error {
+	n, err := s.q.DeletePAT(ctx, db.DeletePATParams{ID: id, UserSub: userSub})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return hoard.ErrNotFound
+	}
+	return nil
 }
