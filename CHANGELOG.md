@@ -2,6 +2,17 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 
+## [0.2.0] - 2026-10-23
+
+Phase 2（生产化与运维基线）。
+
+### 新增
+
+- 限流新增 Redis 实现（`internal/redislimit`，Lua 原子固定窗口，多副本共享计数，fail-open 回退进程内）
+- `/metrics` Prometheus 端点（HTTP 时延/计数 + Go runtime）
+- 单文件大小上限 `HOARD_MAX_FILE_BYTES`（默认 512MiB，超限 413）
+- goose 迁移 advisory-lock 串行化（多副本并发启动安全）
+
 ## [0.1.0] - 2026-10-23
 
 首个可用版本：私群 mod 分发 MVP。
