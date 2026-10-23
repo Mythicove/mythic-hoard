@@ -10,13 +10,13 @@ import (
 
 // MemoryStore 是进程内实现（开发/测试）。
 type MemoryStore struct {
-	mu           sync.RWMutex
-	seq          int
-	projects     map[string]*Project
-	versions     map[string]*Version
-	files        map[string][]*File
-	loadersSet   map[string]struct{}
-	gameVersSet  map[string]struct{}
+	mu            sync.RWMutex
+	seq           int
+	projects      map[string]*Project
+	versions      map[string]*Version
+	files         map[string][]*File
+	loadersSet    map[string]struct{}
+	gameVersSet   map[string]struct{}
 	categoriesSet map[string]struct{}
 }
 

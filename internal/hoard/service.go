@@ -306,9 +306,13 @@ func (s *Service) DeleteProject(ctx context.Context, id string) error {
 }
 
 // Loaders / GameVersions / Categories 返回规范化元数据列表。
-func (s *Service) Loaders(ctx context.Context) ([]string, error)        { return s.store.ListLoaders(ctx) }
-func (s *Service) GameVersions(ctx context.Context) ([]string, error)   { return s.store.ListGameVersions(ctx) }
-func (s *Service) Categories(ctx context.Context) ([]string, error)     { return s.store.ListCategories(ctx) }
+func (s *Service) Loaders(ctx context.Context) ([]string, error) { return s.store.ListLoaders(ctx) }
+func (s *Service) GameVersions(ctx context.Context) ([]string, error) {
+	return s.store.ListGameVersions(ctx)
+}
+func (s *Service) Categories(ctx context.Context) ([]string, error) {
+	return s.store.ListCategories(ctx)
+}
 
 func (s *Service) indexProject(ctx context.Context, p *Project) {
 	if s.search == nil || s.queue == nil {

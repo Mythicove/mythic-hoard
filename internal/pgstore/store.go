@@ -89,14 +89,14 @@ func (s *Store) GetProjectsByIDs(ctx context.Context, ids []string) ([]hoard.Pro
 
 func (s *Store) Search(ctx context.Context, q string, f hoard.Filter, limit, offset int) ([]hoard.Project, int64, error) {
 	params := db.SearchProjectsParams{
-		Column1:      q,
-		Column2:      nonNil(f.Loaders),
-		Column3:      nonNil(f.GameVersions),
-		Column4:      nonNil(f.ProjectTypes),
-		Column5:      nonNil(f.Categories),
-		Column6:      f.Status,
-		Limit:        int32(limit),
-		Offset:       int32(offset),
+		Column1: q,
+		Column2: nonNil(f.Loaders),
+		Column3: nonNil(f.GameVersions),
+		Column4: nonNil(f.ProjectTypes),
+		Column5: nonNil(f.Categories),
+		Column6: f.Status,
+		Limit:   int32(limit),
+		Offset:  int32(offset),
 	}
 	count, err := s.q.CountSearchProjects(ctx, db.CountSearchProjectsParams{
 		Column1: q, Column2: nonNil(f.Loaders), Column3: nonNil(f.GameVersions),
