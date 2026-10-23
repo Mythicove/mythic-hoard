@@ -10,7 +10,7 @@ import (
 )
 
 // clientIP 提取客户端 IP（去掉端口），作为限流键。
-// 反代场景 chi 的 middleware.RealIP 已把 RemoteAddr 还原为真实 IP。
+// 反代场景 clientip.Middleware（可信代理感知）已把 RemoteAddr 还原为真实客户端 IP。
 func clientIP(r *http.Request) string {
 	addr := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(addr); err == nil {

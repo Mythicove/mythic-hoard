@@ -16,6 +16,7 @@ import (
 	queueimpl "github.com/Mythicove/mythic-hoard/internal/queue"
 	"github.com/Mythicove/mythic-hoard/internal/search"
 	hoardstorage "github.com/Mythicove/mythic-hoard/internal/storage"
+	"github.com/Mythicove/shared/clientip"
 	"github.com/Mythicove/shared/queue"
 	"github.com/Mythicove/shared/ratelimit"
 	"github.com/Mythicove/shared/storage"
@@ -52,9 +53,18 @@ func main() {
 	}
 	svc.SetQueue(buildQueue(cfg))
 
+	ipResolver, err := clientip.New(clientip.Options{
+		Headers:        cfg.ClientIPHeaders,
+		TrustedProxies: cfg.TrustedProxies,
+		TrustNone:      cfg.ClientIPTrustNone,
+	})
+	if err != nil {
+		log.Fatalf("client ip resolver: %v", err)
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	r.Use(clientip.Middleware(ipResolver))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Logger)
 	r.Use(cors.Handler(cors.Options{
