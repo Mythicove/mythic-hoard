@@ -15,6 +15,7 @@ import (
 	"github.com/Mythicove/mythic-hoard/internal/migrate"
 	"github.com/Mythicove/mythic-hoard/internal/pgstore"
 	queueimpl "github.com/Mythicove/mythic-hoard/internal/queue"
+	"github.com/Mythicove/mythic-hoard/internal/redislimit"
 	"github.com/Mythicove/mythic-hoard/internal/search"
 	hoardstorage "github.com/Mythicove/mythic-hoard/internal/storage"
 	"github.com/Mythicove/shared/clientip"
@@ -86,7 +87,7 @@ func main() {
 	}))
 	r.Use(hoard.SecurityHeaders())
 	if cfg.RateLimitRPS > 0 {
-		r.Use(hoard.RateLimit(ratelimit.NewMemory(), cfg.RateLimitBurst, time.Second))
+		r.Use(hoard.RateLimit(buildLimiter(context.Background(), cfg), "global", cfg.RateLimitBurst, time.Second))
 	}
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -129,6 +130,18 @@ func buildStorage(ctx context.Context, cfg *config.Config) (storage.Storage, err
 		}, cfg.BaseURL+"/cdn")
 	}
 	return hoardstorage.NewLocal(cfg.DataDir, cfg.BaseURL+"/cdn")
+}
+
+// buildLimiter 构造限流器：配置 Redis 用 Redis（多副本共享计数），否则/失败退回进程内。
+func buildLimiter(ctx context.Context, cfg *config.Config) ratelimit.Limiter {
+	if cfg.RedisAddr != "" {
+		if l, err := redislimit.New(ctx, cfg.RedisAddr, "hoard"); err == nil {
+			return l
+		} else {
+			log.Printf("redis limiter unavailable (%v); falling back to in-memory", err)
+		}
+	}
+	return ratelimit.NewMemory()
 }
 
 func buildQueue(cfg *config.Config) queue.Queue {
