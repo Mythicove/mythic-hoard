@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -86,6 +87,7 @@ func main() {
 		MaxAge:           300,
 	}))
 	r.Use(hoard.SecurityHeaders())
+	r.Use(hoard.Metrics())
 	if cfg.RateLimitRPS > 0 {
 		r.Use(hoard.RateLimit(buildLimiter(context.Background(), cfg), "global", cfg.RateLimitBurst, time.Second))
 	}
@@ -93,6 +95,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	r.Handle("/metrics", promhttp.Handler())
 	svc.Register(r, cfg.AdminToken)
 
 	srv := &http.Server{
