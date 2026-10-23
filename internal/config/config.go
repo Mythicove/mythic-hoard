@@ -42,6 +42,15 @@ type Config struct {
 	ClientIPHeaders   []string `env:"HOARD_CLIENT_IP_HEADERS" envSeparator:","`
 	TrustedProxies    []string `env:"HOARD_TRUSTED_PROXIES" envSeparator:","`
 	ClientIPTrustNone bool     `env:"HOARD_CLIENT_IP_TRUST_NONE"`
+
+	// OIDC RP（Mirror 为 IdP）；Issuer 留空则禁用 SSO 登录。
+	OIDCIssuer       string `env:"HOARD_OIDC_ISSUER"`
+	OIDCClientID     string `env:"HOARD_OIDC_CLIENT_ID"`
+	OIDCClientSecret string `env:"HOARD_OIDC_CLIENT_SECRET"`
+	// 回调地址；留空则取 BaseURL + /auth/oidc/callback。
+	OIDCRedirectURL string `env:"HOARD_OIDC_REDIRECT_URL"`
+	// 管理员 subject 白名单（逗号分隔的 Mirror 用户 ID）；命中者登录即映射 role=admin。
+	AdminSubjects []string `env:"HOARD_ADMIN_SUBJECTS" envSeparator:","`
 }
 
 // Load 从环境变量加载配置。

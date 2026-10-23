@@ -12,7 +12,14 @@ import (
 )
 
 // Register 注册路由；adminToken 用于保护写端点（空则开放）。
+// 注意：会话注入中间件（SessionAuth）须在调用方注册路由**之前**挂载（chi 约束），见 cmd/server/main.go。
 func (s *Service) Register(r chi.Router, adminToken string) {
+	// OIDC 登录流（配置了 RP 才有意义，未配置时端点返回 404）
+	r.Get("/auth/oidc/login", s.HandleOIDCLogin)
+	r.Get("/auth/oidc/callback", s.HandleOIDCCallback)
+	r.Post("/auth/logout", s.HandleLogout)
+	r.Get("/auth/me", s.HandleMe)
+
 	r.Group(func(r chi.Router) {
 		r.Use(Admin(adminToken))
 		r.Post("/api/mods", s.handleUpload)

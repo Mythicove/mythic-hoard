@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Mythicove/mythic-hoard/internal/hoard"
 	"github.com/Mythicove/mythic-hoard/internal/migrate"
@@ -124,5 +125,64 @@ func TestStoreIntegration(t *testing.T) {
 	}
 	if _, err := st.GetProject(ctx, proj.ID); err != hoard.ErrNotFound {
 		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+}
+
+func TestIdentityPG(t *testing.T) {
+	dsn := os.Getenv("HOARD_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("HOARD_TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	if err := migrate.Run(dsn); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	sub := "it-sub-" + time.Now().Format("150405.000")
+	_, _ = st.pool.Exec(ctx, `DELETE FROM users WHERE sub = $1`, sub)
+
+	// upsert 插入 + 重登保留 role
+	if err := st.UpsertUser(ctx, hoard.User{Sub: sub, Username: "u1", Email: "e1", Role: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertUser(ctx, hoard.User{Sub: sub, Username: "u1-new", Email: "e2", Role: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := st.UserBySub(ctx, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Username != "u1-new" || u.Email != "e2" || u.Role != "user" {
+		t.Fatalf("upsert: %+v", u)
+	}
+	// 提权 + 会话
+	if err := st.SetUserRole(ctx, sub, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateSession(ctx, "it-sess-"+sub, sub, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	su, err := st.SessionUser(ctx, "it-sess-"+sub)
+	if err != nil || su.Sub != sub || su.Role != "admin" {
+		t.Fatalf("session: %+v err=%v", su, err)
+	}
+	// 过期会话不可用
+	if err := st.CreateSession(ctx, "it-exp-"+sub, sub, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SessionUser(ctx, "it-exp-"+sub); err != hoard.ErrNotFound {
+		t.Fatalf("expired: %v", err)
+	}
+	// 删除
+	if err := st.DeleteSession(ctx, "it-sess-"+sub); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SessionUser(ctx, "it-sess-"+sub); err != hoard.ErrNotFound {
+		t.Fatalf("deleted: %v", err)
 	}
 }

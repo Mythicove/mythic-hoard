@@ -4,6 +4,7 @@ package hoard
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 var (
@@ -16,6 +17,18 @@ var (
 	// ErrFileTooLarge 表示上传文件超出大小上限。
 	ErrFileTooLarge = errors.New("file too large")
 )
+
+// User 是 OIDC 用户投影（sub = Mirror users.id，不建跨服务外键）。
+type User struct {
+	Sub       string `json:"sub"`
+	Username  string `json:"username"`
+	Email     string `json:"email"`
+	AvatarURL string `json:"avatar_url"`
+	Role      string `json:"role"` // user | admin
+}
+
+// IsAdmin 返回是否管理员。
+func (u *User) IsAdmin() bool { return u != nil && u.Role == "admin" }
 
 // Project 对应 Modrinth 的 project。
 type Project struct {
@@ -125,4 +138,12 @@ type Store interface {
 	ListLoaders(ctx context.Context) ([]string, error)
 	ListGameVersions(ctx context.Context) ([]string, error)
 	ListCategories(ctx context.Context) ([]string, error)
+
+	// 身份（OIDC 投影与会话）
+	UpsertUser(ctx context.Context, u User) error
+	UserBySub(ctx context.Context, sub string) (*User, error)
+	SetUserRole(ctx context.Context, sub, role string) error
+	CreateSession(ctx context.Context, id, userSub string, expires time.Time) error
+	SessionUser(ctx context.Context, sessionID string) (*User, error)
+	DeleteSession(ctx context.Context, id string) error
 }

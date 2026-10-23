@@ -18,6 +18,13 @@ type MemoryStore struct {
 	loadersSet    map[string]struct{}
 	gameVersSet   map[string]struct{}
 	categoriesSet map[string]struct{}
+	users         map[string]*User
+	sessions      map[string]memSession
+}
+
+type memSession struct {
+	userSub string
+	expires time.Time
 }
 
 var _ Store = (*MemoryStore)(nil)
@@ -31,6 +38,8 @@ func NewMemoryStore() *MemoryStore {
 		loadersSet:    map[string]struct{}{},
 		gameVersSet:   map[string]struct{}{},
 		categoriesSet: map[string]struct{}{},
+		users:         map[string]*User{},
+		sessions:      map[string]memSession{},
 	}
 }
 
@@ -279,4 +288,74 @@ func sortedKeys(m map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// 身份投影与会话（内存实现）。
+
+func (s *MemoryStore) UpsertUser(_ context.Context, u User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.users[u.Sub]; ok {
+		existing.Username = u.Username
+		existing.Email = u.Email
+		existing.AvatarURL = u.AvatarURL
+		return nil // role 保留现值
+	}
+	cp := u
+	s.users[u.Sub] = &cp
+	return nil
+}
+
+func (s *MemoryStore) UserBySub(_ context.Context, sub string) (*User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	u, ok := s.users[sub]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *u
+	return &cp, nil
+}
+
+func (s *MemoryStore) SetUserRole(_ context.Context, sub, role string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[sub]
+	if !ok {
+		return ErrNotFound
+	}
+	u.Role = role
+	return nil
+}
+
+func (s *MemoryStore) CreateSession(_ context.Context, id, userSub string, expires time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.users[userSub]; !ok {
+		return ErrNotFound
+	}
+	s.sessions[id] = memSession{userSub: userSub, expires: expires}
+	return nil
+}
+
+func (s *MemoryStore) SessionUser(_ context.Context, sessionID string) (*User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sess, ok := s.sessions[sessionID]
+	if !ok || time.Now().After(sess.expires) {
+		return nil, ErrNotFound
+	}
+	u, ok := s.users[sess.userSub]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *u
+	return &cp, nil
+}
+
+func (s *MemoryStore) DeleteSession(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, id)
+	return nil
 }

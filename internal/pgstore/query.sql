@@ -80,3 +80,32 @@ INSERT INTO game_versions (name) VALUES ($1) ON CONFLICT (name) DO NOTHING;
 
 -- name: UpsertCategory :exec
 INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO NOTHING;
+
+-- name: UpsertUser :exec
+-- OIDC 登录投影 upsert（role 保留现值，不被登录覆盖；管理员映射由服务层处理）。
+INSERT INTO users (sub, username, email, avatar_url, role)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (sub) DO UPDATE
+SET username = EXCLUDED.username, email = EXCLUDED.email,
+    avatar_url = EXCLUDED.avatar_url, last_login = now();
+
+-- name: GetUserBySub :one
+SELECT sub, username, email, avatar_url, role, created_at, last_login FROM users WHERE sub = $1;
+
+-- name: SetUserRole :execrows
+UPDATE users SET role = $2 WHERE sub = $1;
+
+-- name: CreateSession :exec
+INSERT INTO sessions (id, user_sub, expires_at) VALUES ($1, $2, $3);
+
+-- name: GetSession :one
+-- 返回会话及其用户投影；过期会话视为不存在。
+SELECT s.id, s.user_sub, s.expires_at, u.username, u.email, u.avatar_url, u.role
+FROM sessions s JOIN users u ON u.sub = s.user_sub
+WHERE s.id = $1 AND s.expires_at > now();
+
+-- name: DeleteSession :execrows
+DELETE FROM sessions WHERE id = $1;
+
+-- name: DeleteExpiredSessions :execrows
+DELETE FROM sessions WHERE expires_at <= now();

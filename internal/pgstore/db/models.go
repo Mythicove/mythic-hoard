@@ -51,6 +51,23 @@ type Projects struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type Sessions struct {
+	ID        string
+	UserSub   string
+	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
+type Users struct {
+	Sub       string
+	Username  string
+	Email     string
+	AvatarUrl string
+	Role      string
+	CreatedAt pgtype.Timestamptz
+	LastLogin pgtype.Timestamptz
+}
+
 type Versions struct {
 	ID            string
 	ProjectID     string

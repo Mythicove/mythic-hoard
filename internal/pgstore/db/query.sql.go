@@ -168,6 +168,21 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (C
 	return i, err
 }
 
+const createSession = `-- name: CreateSession :exec
+INSERT INTO sessions (id, user_sub, expires_at) VALUES ($1, $2, $3)
+`
+
+type CreateSessionParams struct {
+	ID        string
+	UserSub   string
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
+	_, err := q.db.Exec(ctx, createSession, arg.ID, arg.UserSub, arg.ExpiresAt)
+	return err
+}
+
 const createVersion = `-- name: CreateVersion :one
 INSERT INTO versions (project_id, name, version_number, version_type, changelog, loaders, game_versions)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -221,12 +236,36 @@ func (q *Queries) CreateVersion(ctx context.Context, arg CreateVersionParams) (C
 	return i, err
 }
 
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
+DELETE FROM sessions WHERE expires_at <= now()
+`
+
+func (q *Queries) DeleteExpiredSessions(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredSessions)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteProject = `-- name: DeleteProject :execrows
 DELETE FROM projects WHERE id = $1
 `
 
 func (q *Queries) DeleteProject(ctx context.Context, id string) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteProject, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteSession = `-- name: DeleteSession :execrows
+DELETE FROM sessions WHERE id = $1
+`
+
+func (q *Queries) DeleteSession(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSession, id)
 	if err != nil {
 		return 0, err
 	}
@@ -336,6 +375,57 @@ func (q *Queries) GetProjectsByIDs(ctx context.Context, ids []string) ([]GetProj
 		return nil, err
 	}
 	return items, nil
+}
+
+const getSession = `-- name: GetSession :one
+SELECT s.id, s.user_sub, s.expires_at, u.username, u.email, u.avatar_url, u.role
+FROM sessions s JOIN users u ON u.sub = s.user_sub
+WHERE s.id = $1 AND s.expires_at > now()
+`
+
+type GetSessionRow struct {
+	ID        string
+	UserSub   string
+	ExpiresAt pgtype.Timestamptz
+	Username  string
+	Email     string
+	AvatarUrl string
+	Role      string
+}
+
+// 返回会话及其用户投影；过期会话视为不存在。
+func (q *Queries) GetSession(ctx context.Context, id string) (GetSessionRow, error) {
+	row := q.db.QueryRow(ctx, getSession, id)
+	var i GetSessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserSub,
+		&i.ExpiresAt,
+		&i.Username,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.Role,
+	)
+	return i, err
+}
+
+const getUserBySub = `-- name: GetUserBySub :one
+SELECT sub, username, email, avatar_url, role, created_at, last_login FROM users WHERE sub = $1
+`
+
+func (q *Queries) GetUserBySub(ctx context.Context, sub string) (Users, error) {
+	row := q.db.QueryRow(ctx, getUserBySub, sub)
+	var i Users
+	err := row.Scan(
+		&i.Sub,
+		&i.Username,
+		&i.Email,
+		&i.AvatarUrl,
+		&i.Role,
+		&i.CreatedAt,
+		&i.LastLogin,
+	)
+	return i, err
 }
 
 const getVersion = `-- name: GetVersion :one
@@ -632,6 +722,23 @@ func (q *Queries) SearchProjects(ctx context.Context, arg SearchProjectsParams) 
 	return items, nil
 }
 
+const setUserRole = `-- name: SetUserRole :execrows
+UPDATE users SET role = $2 WHERE sub = $1
+`
+
+type SetUserRoleParams struct {
+	Sub  string
+	Role string
+}
+
+func (q *Queries) SetUserRole(ctx context.Context, arg SetUserRoleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setUserRole, arg.Sub, arg.Role)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateProjectStatus = `-- name: UpdateProjectStatus :exec
 UPDATE projects SET status = $2 WHERE id = $1
 `
@@ -670,5 +777,33 @@ INSERT INTO loaders (name) VALUES ($1) ON CONFLICT (name) DO NOTHING
 
 func (q *Queries) UpsertLoader(ctx context.Context, name string) error {
 	_, err := q.db.Exec(ctx, upsertLoader, name)
+	return err
+}
+
+const upsertUser = `-- name: UpsertUser :exec
+INSERT INTO users (sub, username, email, avatar_url, role)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (sub) DO UPDATE
+SET username = EXCLUDED.username, email = EXCLUDED.email,
+    avatar_url = EXCLUDED.avatar_url, last_login = now()
+`
+
+type UpsertUserParams struct {
+	Sub       string
+	Username  string
+	Email     string
+	AvatarUrl string
+	Role      string
+}
+
+// OIDC 登录投影 upsert（role 保留现值，不被登录覆盖；管理员映射由服务层处理）。
+func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) error {
+	_, err := q.db.Exec(ctx, upsertUser,
+		arg.Sub,
+		arg.Username,
+		arg.Email,
+		arg.AvatarUrl,
+		arg.Role,
+	)
 	return err
 }

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Mythicove/mythic-hoard/internal/oidcrp"
 	"github.com/Mythicove/shared/queue"
 	"github.com/Mythicove/shared/search"
 	"github.com/Mythicove/shared/storage"
@@ -26,6 +27,8 @@ type Service struct {
 	baseURL       string
 	requireReview bool
 	maxFileBytes  int64
+	oidc          *oidcrp.RP
+	adminSubjects []string
 }
 
 // DefaultMaxFileBytes 是单个 mod 文件的默认大小上限（512 MiB）。

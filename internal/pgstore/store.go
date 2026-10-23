@@ -346,3 +346,55 @@ func versionFromGetRow(r db.GetVersionRow) *hoard.Version {
 		DatePublished: ts(r.DatePublished),
 	}
 }
+
+// 身份投影与会话。
+
+func (s *Store) UpsertUser(ctx context.Context, u hoard.User) error {
+	return s.q.UpsertUser(ctx, db.UpsertUserParams{
+		Sub: u.Sub, Username: u.Username, Email: u.Email, AvatarUrl: u.AvatarURL, Role: u.Role,
+	})
+}
+
+func (s *Store) UserBySub(ctx context.Context, sub string) (*hoard.User, error) {
+	row, err := s.q.GetUserBySub(ctx, sub)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, hoard.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &hoard.User{Sub: row.Sub, Username: row.Username, Email: row.Email, AvatarURL: row.AvatarUrl, Role: row.Role}, nil
+}
+
+func (s *Store) SetUserRole(ctx context.Context, sub, role string) error {
+	n, err := s.q.SetUserRole(ctx, db.SetUserRoleParams{Sub: sub, Role: role})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return hoard.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) CreateSession(ctx context.Context, id, userSub string, expires time.Time) error {
+	return s.q.CreateSession(ctx, db.CreateSessionParams{
+		ID: id, UserSub: userSub, ExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true},
+	})
+}
+
+func (s *Store) SessionUser(ctx context.Context, sessionID string) (*hoard.User, error) {
+	row, err := s.q.GetSession(ctx, sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, hoard.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &hoard.User{Sub: row.UserSub, Username: row.Username, Email: row.Email, AvatarURL: row.AvatarUrl, Role: row.Role}, nil
+}
+
+func (s *Store) DeleteSession(ctx context.Context, id string) error {
+	_, err := s.q.DeleteSession(ctx, id)
+	return err
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/Mythicove/mythic-hoard/internal/config"
 	"github.com/Mythicove/mythic-hoard/internal/hoard"
 	"github.com/Mythicove/mythic-hoard/internal/migrate"
+	"github.com/Mythicove/mythic-hoard/internal/oidcrp"
 	"github.com/Mythicove/mythic-hoard/internal/pgstore"
 	queueimpl "github.com/Mythicove/mythic-hoard/internal/queue"
 	"github.com/Mythicove/mythic-hoard/internal/redislimit"
@@ -57,6 +58,27 @@ func main() {
 	}
 	svc.SetQueue(buildQueue(cfg))
 
+	// OIDC RP（Mirror 为 IdP）；未配置 Issuer 时 SSO 登录端点返回 404。
+	if cfg.OIDCIssuer != "" {
+		redirect := cfg.OIDCRedirectURL
+		if redirect == "" {
+			redirect = strings.TrimRight(cfg.BaseURL, "/") + "/auth/oidc/callback"
+		}
+		rp, err := oidcrp.New(context.Background(), oidcrp.Config{
+			Issuer:       cfg.OIDCIssuer,
+			ClientID:     cfg.OIDCClientID,
+			ClientSecret: cfg.OIDCClientSecret,
+			RedirectURL:  redirect,
+		})
+		if err != nil {
+			log.Fatalf("oidc rp: %v", err)
+		}
+		svc.SetOIDC(rp, cfg.AdminSubjects)
+		log.Printf("OIDC RP enabled (issuer=%s)", cfg.OIDCIssuer)
+	} else {
+		log.Printf("HOARD_OIDC_ISSUER not set; SSO login disabled")
+	}
+
 	ipResolver, err := clientip.New(clientip.Options{
 		Headers:        cfg.ClientIPHeaders,
 		TrustedProxies: cfg.TrustedProxies,
@@ -80,11 +102,12 @@ func main() {
 	if len(origins) == 0 {
 		origins = []string{"*"}
 	}
+	// 通配回退（仅开发）不允许凭证；显式白名单时允许（SSO 会话 cookie 需要）。
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: false,
+		AllowCredentials: len(cfg.CORSOrigins) > 0,
 		MaxAge:           300,
 	}))
 	r.Use(hoard.SecurityHeaders())
@@ -92,6 +115,8 @@ func main() {
 	if cfg.RateLimitRPS > 0 {
 		r.Use(hoard.RateLimit(buildLimiter(context.Background(), cfg), "global", cfg.RateLimitBurst, time.Second))
 	}
+	// 会话注入须在任何路由注册前（chi 约束）
+	r.Use(svc.SessionAuth())
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
