@@ -5,41 +5,41 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
 
-// Register 注册路由；adminToken 用于保护上传端点（空则开放）。
-func (s *Store) Register(r chi.Router, adminToken string) {
+// Register 注册路由；adminToken 用于保护写端点（空则开放）。
+func (s *Service) Register(r chi.Router, adminToken string) {
 	r.Group(func(r chi.Router) {
 		r.Use(Admin(adminToken))
 		r.Post("/api/mods", s.handleUpload)
+		r.Patch("/api/mods/{id}/status", s.handleSetStatus)
+		r.Delete("/api/mods/{id}", s.handleDelete)
 	})
-	r.Get("/api/mods", s.handleList)
+
+	r.Get("/api/mods", s.handleSearch)
 	r.Get("/api/mods/{id}", s.handleGetProject)
 	r.Get("/api/mods/{id}/download", s.handleDownload)
+	r.Get("/api/mods/{id}/version/{vid}/file/{fid}", s.handleFile)
+
 	r.Get("/v2/search", s.handleSearch)
-	r.Get("/v2/project/{id}", s.handleGetProjectModrinth)
+	r.Get("/v2/project/{id}", s.handleGetProject)
 	r.Get("/v2/project/{id}/version", s.handleProjectVersions)
 	r.Get("/v2/version/{id}", s.handleGetVersion)
 	r.Get("/v2/project/{id}/version/{vid}/mrpack", s.handleMrpack)
+	r.Get("/v2/tag/loader", s.handleTagLoaders)
+	r.Get("/v2/tag/game_version", s.handleTagGameVersions)
+	r.Get("/v2/tag/category", s.handleTagCategories)
 }
 
-func (s *Store) handleUpload(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid multipart body", http.StatusBadRequest)
 		return
 	}
-	title := r.FormValue("title")
-	description := r.FormValue("description")
-	projectType := r.FormValue("project_type")
-	if projectType == "" {
-		projectType = "mod"
-	}
-	versionNumber := r.FormValue("version_number")
-	loaders := splitCSV(r.FormValue("loaders"))
-	gameVersions := splitCSV(r.FormValue("game_versions"))
 	f, hdr, err := r.FormFile("file")
 	if err != nil {
 		http.Error(w, "file required", http.StatusBadRequest)
@@ -47,39 +47,60 @@ func (s *Store) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	project, err := s.Upload(title, description, projectType, versionNumber, loaders, gameVersions, hdr.Filename, f)
+	project, err := s.Upload(r.Context(), UploadInput{
+		Title:         r.FormValue("title"),
+		Description:   r.FormValue("description"),
+		Body:          r.FormValue("body"),
+		ProjectType:   r.FormValue("project_type"),
+		ClientSide:    r.FormValue("client_side"),
+		ServerSide:    r.FormValue("server_side"),
+		Loaders:       splitCSV(r.FormValue("loaders")),
+		GameVersions:  splitCSV(r.FormValue("game_versions")),
+		Categories:    splitCSV(r.FormValue("categories")),
+		VersionName:   r.FormValue("name"),
+		VersionNumber: r.FormValue("version_number"),
+		VersionType:   r.FormValue("version_type"),
+		Changelog:     r.FormValue("changelog"),
+		Filename:      hdr.Filename,
+		Data:          f,
+	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		if err == ErrInvalid {
+			http.Error(w, "title and file are required", http.StatusBadRequest)
+		} else {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
 	writeJSON(w, http.StatusCreated, project)
 }
 
-func (s *Store) handleList(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.List())
+func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	f := filterFromQuery(r)
+	limit := intQuery(r, "limit", 20)
+	offset := intQuery(r, "offset", 0)
+	f.Status = "listed"
+
+	res, err := s.Search(r.Context(), q, f, limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
-func (s *Store) handleGetProject(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.FindProject(chi.URLParam(r, "id"))
-	if !ok {
+func (s *Service) handleGetProject(w http.ResponseWriter, r *http.Request) {
+	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
 }
 
-func (s *Store) handleDownload(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.FindProject(chi.URLParam(r, "id"))
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	versions := s.VersionsOf(p.ID)
-	if len(versions) == 0 {
-		http.NotFound(w, r)
-		return
-	}
-	rc, file, err := s.OpenFile(versions[0])
+func (s *Service) handleDownload(w http.ResponseWriter, r *http.Request) {
+	rc, file, err := s.Download(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -87,65 +108,87 @@ func (s *Store) handleDownload(w http.ResponseWriter, r *http.Request) {
 	defer rc.Close()
 	w.Header().Set("Content-Disposition", "attachment; filename="+file.Filename)
 	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	_, _ = io.Copy(w, rc)
 }
 
-func (s *Store) handleSearch(w http.ResponseWriter, _ *http.Request) {
-	projects := s.List()
-	hits := make([]map[string]any, 0, len(projects))
-	for _, p := range projects {
-		hits = append(hits, map[string]any{
-			"project_id": p.ID, "project_type": p.ProjectType, "slug": p.Slug,
-			"title": p.Title, "description": p.Description, "downloads": p.Downloads,
-			"author": "mythicove", "date_modified": p.Published,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"hits": hits, "offset": 0, "limit": len(hits), "total_hits": len(hits),
-	})
-}
-
-func (s *Store) handleGetProjectModrinth(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.FindProject(chi.URLParam(r, "id"))
-	if !ok {
+func (s *Service) handleFile(w http.ResponseWriter, r *http.Request) {
+	rc, file, err := s.FileStream(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "vid"), chi.URLParam(r, "fid"))
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	defer rc.Close()
+	w.Header().Set("Content-Disposition", "attachment; filename="+file.Filename)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
+	_, _ = io.Copy(w, rc)
 }
 
-func (s *Store) handleProjectVersions(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.FindProject(chi.URLParam(r, "id"))
-	if !ok {
+func (s *Service) handleProjectVersions(w http.ResponseWriter, r *http.Request) {
+	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.VersionsOf(p.ID))
+	versions, err := s.Versions(r.Context(), p.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, versions)
 }
 
-func (s *Store) handleGetVersion(w http.ResponseWriter, r *http.Request) {
-	v, ok := s.GetVersion(chi.URLParam(r, "id"))
-	if !ok {
+func (s *Service) handleGetVersion(w http.ResponseWriter, r *http.Request) {
+	v, err := s.Version(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
 }
 
-func (s *Store) handleMrpack(w http.ResponseWriter, r *http.Request) {
-	v, ok := s.GetVersion(chi.URLParam(r, "vid"))
-	if !ok {
+func (s *Service) handleSetStatus(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if err := s.SetStatus(r.Context(), chi.URLParam(r, "id"), req.Status); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Service) handleDelete(w http.ResponseWriter, r *http.Request) {
+	if err := s.DeleteProject(r.Context(), chi.URLParam(r, "id")); err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	p, _ := s.GetProject(v.ProjectID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Service) handleMrpack(w http.ResponseWriter, r *http.Request) {
+	v, err := s.Version(r.Context(), chi.URLParam(r, "vid"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
 
 	files := make([]map[string]any, 0, len(v.Files))
 	for _, f := range v.Files {
 		files = append(files, map[string]any{
 			"path":      f.Filename,
 			"hashes":    f.Hashes,
-			"downloads": []string{"/api/mods/" + p.ID + "/download"},
+			"downloads": []string{f.URL},
 			"fileSize":  f.Size,
 		})
 	}
@@ -166,6 +209,80 @@ func (s *Store) handleMrpack(w http.ResponseWriter, r *http.Request) {
 	_ = zw.Close()
 }
 
+func (s *Service) handleTagLoaders(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Loaders(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Service) handleTagGameVersions(w http.ResponseWriter, r *http.Request) {
+	list, err := s.GameVersions(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Service) handleTagCategories(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Categories(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// filterFromQuery 从查询参数构造 Filter，兼容 Modrinth facets 与简单参数。
+func filterFromQuery(r *http.Request) Filter {
+	f := Filter{}
+	if facets := r.URL.Query().Get("facets"); facets != "" {
+		parseFacets(facets, &f)
+	}
+	if v := r.URL.Query().Get("loaders"); v != "" {
+		f.Loaders = splitCSV(v)
+	}
+	if v := r.URL.Query().Get("game_versions"); v != "" {
+		f.GameVersions = splitCSV(v)
+	}
+	if v := r.URL.Query().Get("project_type"); v != "" {
+		f.ProjectTypes = splitCSV(v)
+	}
+	if v := r.URL.Query().Get("categories"); v != "" {
+		f.Categories = splitCSV(v)
+	}
+	return f
+}
+
+// parseFacets 解析 Modrinth facets（外层 AND，内层 OR）：[["versions:1.20.1"],["project_type:mod"]]。
+func parseFacets(raw string, f *Filter) {
+	var groups [][]string
+	if err := json.Unmarshal([]byte(raw), &groups); err != nil {
+		return
+	}
+	for _, group := range groups {
+		for _, entry := range group {
+			key, val, ok := strings.Cut(entry, ":")
+			if !ok {
+				continue
+			}
+			switch key {
+			case "loaders":
+				f.Loaders = append(f.Loaders, val)
+			case "versions":
+				f.GameVersions = append(f.GameVersions, val)
+			case "categories":
+				f.Categories = append(f.Categories, val)
+			case "project_type":
+				f.ProjectTypes = append(f.ProjectTypes, val)
+			}
+		}
+	}
+}
+
 func splitCSV(s string) []string {
 	if s == "" {
 		return nil
@@ -178,6 +295,18 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func intQuery(r *http.Request, key string, def int) int {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return def
+	}
+	return n
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

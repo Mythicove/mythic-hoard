@@ -10,16 +10,23 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Mythicove/mythic-hoard/internal/storage"
 	"github.com/go-chi/chi/v5"
 )
 
-func TestUploadListDownloadMrpack(t *testing.T) {
-	store, err := New(t.TempDir())
+func newTestService(t *testing.T) *Service {
+	t.Helper()
+	files, err := storage.NewLocal(t.TempDir(), "http://localhost:8080")
 	if err != nil {
 		t.Fatal(err)
 	}
+	return NewService(NewMemoryStore(), files, "http://localhost:8080")
+}
+
+func TestUploadListDownloadMrpack(t *testing.T) {
+	svc := newTestService(t)
 	r := chi.NewRouter()
-	store.Register(r, "")
+	svc.Register(r, "")
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 
@@ -47,22 +54,23 @@ func TestUploadListDownloadMrpack(t *testing.T) {
 
 	// 列表
 	resp, _ = http.Get(srv.URL + "/api/mods")
-	var projects []*Project
-	_ = json.NewDecoder(resp.Body).Decode(&projects)
+	var result SearchResult
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 	resp.Body.Close()
-	if len(projects) != 1 || projects[0].Title != "Fabric Mod" {
-		t.Fatalf("list: %+v", projects)
+	if len(result.Hits) != 1 || result.Hits[0].Title != "Fabric Mod" {
+		t.Fatalf("list: %+v", result)
 	}
+	projID := result.Hits[0].ID
 
 	// Modrinth 兼容读
-	resp, _ = http.Get(srv.URL + "/v2/project/" + projects[0].ID)
+	resp, _ = http.Get(srv.URL + "/v2/project/" + projID)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("modrinth project status %d", resp.StatusCode)
 	}
 
 	// 下载
-	resp, _ = http.Get(srv.URL + "/api/mods/" + projects[0].ID + "/download")
+	resp, _ = http.Get(srv.URL + "/api/mods/" + projID + "/download")
 	data, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if string(data) != "fake-jar-bytes" {
@@ -70,8 +78,8 @@ func TestUploadListDownloadMrpack(t *testing.T) {
 	}
 
 	// 取版本 id
-	resp, _ = http.Get(srv.URL + "/v2/project/" + projects[0].ID + "/version")
-	var versions []*Version
+	resp, _ = http.Get(srv.URL + "/v2/project/" + projID + "/version")
+	var versions []Version
 	_ = json.NewDecoder(resp.Body).Decode(&versions)
 	resp.Body.Close()
 	if len(versions) != 1 {
@@ -79,7 +87,7 @@ func TestUploadListDownloadMrpack(t *testing.T) {
 	}
 
 	// mrpack
-	resp, _ = http.Get(srv.URL + "/v2/project/" + projects[0].ID + "/version/" + versions[0].ID + "/mrpack")
+	resp, _ = http.Get(srv.URL + "/v2/project/" + projID + "/version/" + versions[0].ID + "/mrpack")
 	zdata, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	zr, err := zip.NewReader(bytes.NewReader(zdata), int64(len(zdata)))
