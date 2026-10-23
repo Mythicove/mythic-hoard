@@ -51,6 +51,9 @@ func (s *Service) SetMaxFileBytes(n int64) {
 	}
 }
 
+// Store 返回底层存储（测试与组合用）。
+func (s *Service) Store() Store { return s.store }
+
 // SetSearch 设置搜索后端（可选，nil 表示使用 Store 内置 pg_trgm 查询）。
 func (s *Service) SetSearch(sr search.Search) { s.search = sr }
 
@@ -82,6 +85,7 @@ type UploadInput struct {
 	Changelog     string
 	Filename      string
 	Data          io.Reader
+	Deps          []NewDependency
 }
 
 // Upload 存储文件并创建 project + version + file 元数据。
@@ -176,6 +180,14 @@ func (s *Service) Upload(ctx context.Context, in UploadInput) (*Project, error) 
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(in.Deps) > 0 {
+		if err := validateDeps(in.Deps); err != nil {
+			return nil, err
+		}
+		if err := s.store.AddVersionDependencies(ctx, ver.ID, in.Deps); err != nil {
+			return nil, err
+		}
 	}
 
 	if _, err := s.store.CreateFile(ctx, ver.ID, NewFile{
@@ -486,6 +498,22 @@ type VersionInput struct {
 	GameVersions  []string
 	Filename      string
 	Data          io.Reader
+	Deps          []NewDependency
+}
+
+// validDepTypes 是允许的依赖类型（Modrinth 语义）。
+var validDepTypes = map[string]bool{
+	"required": true, "optional": true, "incompatible": true, "embedded": true,
+}
+
+// validateDeps 校验依赖类型合法。
+func validateDeps(deps []NewDependency) error {
+	for _, d := range deps {
+		if !validDepTypes[d.DependencyType] {
+			return ErrInvalid
+		}
+	}
+	return nil
 }
 
 // UserUpload 由登录用户创建项目：自动建团队（创建者为 owner）并归属项目。
@@ -530,6 +558,14 @@ func (s *Service) UserAddVersion(ctx context.Context, u *User, in VersionInput) 
 	})
 	if err != nil {
 		return nil, err
+	}
+	if len(in.Deps) > 0 {
+		if err := validateDeps(in.Deps); err != nil {
+			return nil, err
+		}
+		if err := s.store.AddVersionDependencies(ctx, ver.ID, in.Deps); err != nil {
+			return nil, err
+		}
 	}
 	if _, err := s.store.CreateFile(ctx, ver.ID, NewFile{
 		Filename:   in.Filename,

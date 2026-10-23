@@ -55,6 +55,7 @@ func (s *Service) Register(r chi.Router, adminToken string) {
 	r.Get("/v2/search", s.handleSearch)
 	r.Get("/v2/project/{id}", s.handleGetProject)
 	r.Get("/v2/project/{id}/icon", s.handleIcon)
+	r.Get("/v2/project/{id}/dependencies", s.handleProjectDependencies)
 	r.Get("/v2/project/{id}/version", s.handleProjectVersions)
 	r.Get("/v2/version/{id}", s.handleGetVersion)
 	r.Get("/v2/project/{id}/version/{vid}/mrpack", s.handleMrpack)
@@ -246,13 +247,28 @@ func (s *Service) handleMrpack(w http.ResponseWriter, r *http.Request) {
 			"fileSize":  f.Size,
 		})
 	}
+	deps := mrpackDependencies(v.Loaders, p.Loaders)
+	// minecraft 版本：版本级 game_versions 优先，项目级兜底，均无则 "*"
+	mcVersion := "*"
+	gv := v.GameVersions
+	if len(gv) == 0 {
+		gv = p.GameVersions
+	}
+	if len(gv) > 0 {
+		mcVersion = gv[0]
+	}
+	deps["minecraft"] = map[string]string{"version": mcVersion}
 	index := map[string]any{
 		"formatVersion": 1,
 		"game":          "minecraft",
 		"versionId":     v.VersionNumber,
 		"name":          p.Title,
 		"files":         files,
-		"dependencies":  mrpackDependencies(v.Loaders, p.Loaders),
+		"dependencies":  deps,
+		"env": map[string]string{
+			"client": mrpackEnv(p.ClientSide),
+			"server": mrpackEnv(p.ServerSide),
+		},
 	}
 
 	w.Header().Set("Content-Type", "application/zip")
@@ -261,7 +277,19 @@ func (s *Service) handleMrpack(w http.ResponseWriter, r *http.Request) {
 	entry, _ := zw.Create("modrinth.index.json")
 	data, _ := json.Marshal(index)
 	_, _ = entry.Write(data)
+	// overrides/ 目录（生成场景无覆盖文件，保留空目录符合 mrpack 惯例）
+	_, _ = zw.Create("overrides/")
 	_ = zw.Close()
+}
+
+// mrpackEnv 把项目 client_side/server_side 映射为 mrpack env 值。
+func mrpackEnv(v string) string {
+	switch v {
+	case "required", "optional", "unsupported":
+		return v
+	default:
+		return "required"
+	}
 }
 
 // mrpackLoaderIDs 把项目 loader 名映射为 mrpack dependencies 的键。

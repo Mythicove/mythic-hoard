@@ -558,3 +558,48 @@ func (s *Store) DeletePAT(ctx context.Context, userSub, id string) error {
 	}
 	return nil
 }
+
+// 版本依赖。
+
+func (s *Store) AddVersionDependencies(ctx context.Context, versionID string, deps []hoard.NewDependency) error {
+	for _, d := range deps {
+		if err := s.q.AddVersionDependency(ctx, db.AddVersionDependencyParams{
+			VersionID: versionID, DependencyType: d.DependencyType,
+			ProjectID: d.ProjectID, DepVersionID: d.VersionID, FileName: d.FileName,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func depFromRow(id, versionID, depType, projectID, depVersionID, fileName string) hoard.Dependency {
+	return hoard.Dependency{
+		ID: id, SourceVersion: versionID, DependencyType: depType,
+		ProjectID: projectID, VersionID: depVersionID, FileName: fileName,
+	}
+}
+
+func (s *Store) ListVersionDependencies(ctx context.Context, versionID string) ([]hoard.Dependency, error) {
+	rows, err := s.q.ListVersionDependencies(ctx, versionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hoard.Dependency, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, depFromRow(r.ID, r.VersionID, r.DependencyType, r.ProjectID, r.DepVersionID, r.FileName))
+	}
+	return out, nil
+}
+
+func (s *Store) ListProjectDependencies(ctx context.Context, projectID string) ([]hoard.Dependency, error) {
+	rows, err := s.q.ListProjectDependencies(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hoard.Dependency, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, depFromRow(r.ID, r.VersionID, r.DependencyType, r.ProjectID, r.DepVersionID, r.FileName))
+	}
+	return out, nil
+}

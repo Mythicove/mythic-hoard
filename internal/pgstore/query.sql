@@ -165,3 +165,17 @@ UPDATE personal_access_tokens SET last_used = now() WHERE id = $1;
 
 -- name: DeletePAT :execrows
 DELETE FROM personal_access_tokens WHERE id = $1 AND user_sub = $2;
+
+-- name: AddVersionDependency :exec
+INSERT INTO version_dependencies (version_id, dependency_type, project_id, dep_version_id, file_name)
+VALUES ($1, $2, $3, $4, $5);
+
+-- name: ListVersionDependencies :many
+SELECT id, version_id, dependency_type, project_id, dep_version_id, file_name
+FROM version_dependencies WHERE version_id = $1 ORDER BY created_at ASC;
+
+-- name: ListProjectDependencies :many
+-- 项目全部版本的依赖（Modrinth GET /v2/project/{id}/dependencies 形）。
+SELECT d.id, d.version_id, d.dependency_type, d.project_id, d.dep_version_id, d.file_name
+FROM version_dependencies d JOIN versions v ON v.id = d.version_id
+WHERE v.project_id = $1 ORDER BY d.created_at ASC;

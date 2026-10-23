@@ -9,32 +9,53 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// dependencyInput 是版本依赖的 JSON 输入（Modrinth 形）。
+type dependencyInput struct {
+	DependencyType string `json:"dependency_type"`
+	ProjectID      string `json:"project_id"`
+	VersionID      string `json:"version_id"`
+	FileName       string `json:"file_name"`
+}
+
+func toNewDeps(in []dependencyInput) []NewDependency {
+	out := make([]NewDependency, 0, len(in))
+	for _, d := range in {
+		out = append(out, NewDependency{
+			DependencyType: d.DependencyType, ProjectID: d.ProjectID,
+			VersionID: d.VersionID, FileName: d.FileName,
+		})
+	}
+	return out
+}
+
 // projectData 是 POST /v2/project 的 multipart data 部分（Modrinth 形，数组字段为 JSON 数组）。
 type projectData struct {
-	Title         string   `json:"title"`
-	Description   string   `json:"description"`
-	Body          string   `json:"body"`
-	ProjectType   string   `json:"project_type"`
-	ClientSide    string   `json:"client_side"`
-	ServerSide    string   `json:"server_side"`
-	Loaders       []string `json:"loaders"`
-	GameVersions  []string `json:"game_versions"`
-	Categories    []string `json:"categories"`
-	VersionName   string   `json:"version_name"`
-	VersionNumber string   `json:"version_number"`
-	VersionType   string   `json:"version_type"`
-	Changelog     string   `json:"changelog"`
+	Title         string            `json:"title"`
+	Description   string            `json:"description"`
+	Body          string            `json:"body"`
+	ProjectType   string            `json:"project_type"`
+	ClientSide    string            `json:"client_side"`
+	ServerSide    string            `json:"server_side"`
+	Loaders       []string          `json:"loaders"`
+	GameVersions  []string          `json:"game_versions"`
+	Categories    []string          `json:"categories"`
+	VersionName   string            `json:"version_name"`
+	VersionNumber string            `json:"version_number"`
+	VersionType   string            `json:"version_type"`
+	Changelog     string            `json:"changelog"`
+	Dependencies  []dependencyInput `json:"dependencies"`
 }
 
 // versionData 是 POST /v2/version 的 multipart data 部分。
 type versionData struct {
-	ProjectID     string   `json:"project_id"`
-	Name          string   `json:"name"`
-	VersionNumber string   `json:"version_number"`
-	VersionType   string   `json:"version_type"`
-	Changelog     string   `json:"changelog"`
-	Loaders       []string `json:"loaders"`
-	GameVersions  []string `json:"game_versions"`
+	ProjectID     string            `json:"project_id"`
+	Name          string            `json:"name"`
+	VersionNumber string            `json:"version_number"`
+	VersionType   string            `json:"version_type"`
+	Changelog     string            `json:"changelog"`
+	Loaders       []string          `json:"loaders"`
+	GameVersions  []string          `json:"game_versions"`
+	Dependencies  []dependencyInput `json:"dependencies"`
 }
 
 // requireUploadScope 校验 PAT scopes（会话登录无 scopes 限制；PAT 声明了 scopes 则须含 UPLOAD）。
@@ -90,6 +111,7 @@ func (s *Service) handleUserCreateProject(w http.ResponseWriter, r *http.Request
 		Changelog:     data.Changelog,
 		Filename:      hdr.Filename,
 		Data:          file,
+		Deps:          toNewDeps(data.Dependencies),
 	})
 	if err != nil {
 		writeUploadError(w, err)
@@ -135,6 +157,7 @@ func (s *Service) handleUserAddVersion(w http.ResponseWriter, r *http.Request) {
 		GameVersions:  data.GameVersions,
 		Filename:      hdr.Filename,
 		Data:          file,
+		Deps:          toNewDeps(data.Dependencies),
 	})
 	if err != nil {
 		writeUploadError(w, err)
@@ -151,6 +174,21 @@ func (s *Service) handleUserDeleteProject(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleProjectDependencies 返回项目全部版本的依赖（Modrinth 形）。
+func (s *Service) handleProjectDependencies(w http.ResponseWriter, r *http.Request) {
+	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	deps, err := s.store.ListProjectDependencies(r.Context(), p.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, deps)
 }
 
 // writeUploadError 统一映射用户级写端点错误。

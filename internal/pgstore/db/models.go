@@ -96,6 +96,16 @@ type Users struct {
 	LastLogin pgtype.Timestamptz
 }
 
+type VersionDependencies struct {
+	ID             string
+	VersionID      string
+	DependencyType string
+	ProjectID      string
+	DepVersionID   string
+	FileName       string
+	CreatedAt      pgtype.Timestamptz
+}
+
 type Versions struct {
 	ID            string
 	ProjectID     string

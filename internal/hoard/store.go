@@ -66,6 +66,24 @@ type PATSession struct {
 	Scopes []string
 }
 
+// NewDependency 是一条待存的版本依赖。
+type NewDependency struct {
+	DependencyType string // required | optional | incompatible | embedded
+	ProjectID      string // 目标项目（可空）
+	VersionID      string // 目标版本（可空）
+	FileName       string // embedded 的展示文件名（可空）
+}
+
+// Dependency 是版本依赖记录（Modrinth GET /v2/project/{id}/dependencies 形）。
+type Dependency struct {
+	ID             string `json:"id"`
+	SourceVersion  string `json:"-"`
+	VersionID      string `json:"version_id,omitempty"` // 目标版本
+	ProjectID      string `json:"project_id,omitempty"` // 目标项目
+	DependencyType string `json:"dependency_type"`
+	FileName       string `json:"file_name,omitempty"`
+}
+
 // Project 对应 Modrinth 的 project。
 type Project struct {
 	ID           string   `json:"id"`
@@ -174,6 +192,11 @@ type Store interface {
 	CreateVersion(ctx context.Context, projectID string, v NewVersion) (*Version, error)
 	ListVersions(ctx context.Context, projectID string) ([]Version, error)
 	GetVersion(ctx context.Context, id string) (*Version, error)
+
+	// 版本依赖
+	AddVersionDependencies(ctx context.Context, versionID string, deps []NewDependency) error
+	ListVersionDependencies(ctx context.Context, versionID string) ([]Dependency, error)
+	ListProjectDependencies(ctx context.Context, projectID string) ([]Dependency, error)
 
 	CreateFile(ctx context.Context, versionID string, f NewFile) (*File, error)
 	ListFiles(ctx context.Context, versionID string) ([]File, error)

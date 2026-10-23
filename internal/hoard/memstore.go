@@ -22,6 +22,7 @@ type MemoryStore struct {
 	sessions      map[string]memSession
 	teams         map[string]*memTeam
 	pats          map[string]*memPAT
+	deps          map[string][]Dependency // version_id -> dependencies
 }
 
 type memTeam struct {
@@ -61,6 +62,7 @@ func NewMemoryStore() *MemoryStore {
 		sessions:      map[string]memSession{},
 		teams:         map[string]*memTeam{},
 		pats:          map[string]*memPAT{},
+		deps:          map[string][]Dependency{},
 	}
 }
 
@@ -573,4 +575,47 @@ func (s *MemoryStore) DeletePAT(_ context.Context, userSub, id string) error {
 	}
 	delete(s.pats, id)
 	return nil
+}
+
+// 版本依赖（内存实现）。
+
+func (s *MemoryStore) AddVersionDependencies(_ context.Context, versionID string, deps []NewDependency) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.versions[versionID]; !ok {
+		return ErrNotFound
+	}
+	for _, d := range deps {
+		s.deps[versionID] = append(s.deps[versionID], Dependency{
+			ID: s.nextID("dep"), VersionID: d.VersionID, ProjectID: d.ProjectID,
+			DependencyType: d.DependencyType, FileName: d.FileName,
+		})
+	}
+	return nil
+}
+
+func (s *MemoryStore) ListVersionDependencies(_ context.Context, versionID string) ([]Dependency, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Dependency, 0, len(s.deps[versionID]))
+	for _, d := range s.deps[versionID] {
+		d.SourceVersion = versionID
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func (s *MemoryStore) ListProjectDependencies(_ context.Context, projectID string) ([]Dependency, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []Dependency{}
+	for vid, deps := range s.deps {
+		if v, ok := s.versions[vid]; ok && v.ProjectID == projectID {
+			for _, d := range deps {
+				d.SourceVersion = vid
+				out = append(out, d)
+			}
+		}
+	}
+	return out, nil
 }

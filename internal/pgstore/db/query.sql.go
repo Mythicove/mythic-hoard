@@ -30,6 +30,30 @@ func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (i
 	return result.RowsAffected(), nil
 }
 
+const addVersionDependency = `-- name: AddVersionDependency :exec
+INSERT INTO version_dependencies (version_id, dependency_type, project_id, dep_version_id, file_name)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type AddVersionDependencyParams struct {
+	VersionID      string
+	DependencyType string
+	ProjectID      string
+	DepVersionID   string
+	FileName       string
+}
+
+func (q *Queries) AddVersionDependency(ctx context.Context, arg AddVersionDependencyParams) error {
+	_, err := q.db.Exec(ctx, addVersionDependency,
+		arg.VersionID,
+		arg.DependencyType,
+		arg.ProjectID,
+		arg.DepVersionID,
+		arg.FileName,
+	)
+	return err
+}
+
 const countSearchProjects = `-- name: CountSearchProjects :one
 SELECT count(*) FROM projects
 WHERE ($1::text = '' OR title ILIKE '%' || $1::text || '%' OR description ILIKE '%' || $1::text || '%')
@@ -817,6 +841,49 @@ func (q *Queries) ListPATs(ctx context.Context, userSub string) ([]ListPATsRow, 
 	return items, nil
 }
 
+const listProjectDependencies = `-- name: ListProjectDependencies :many
+SELECT d.id, d.version_id, d.dependency_type, d.project_id, d.dep_version_id, d.file_name
+FROM version_dependencies d JOIN versions v ON v.id = d.version_id
+WHERE v.project_id = $1 ORDER BY d.created_at ASC
+`
+
+type ListProjectDependenciesRow struct {
+	ID             string
+	VersionID      string
+	DependencyType string
+	ProjectID      string
+	DepVersionID   string
+	FileName       string
+}
+
+// 项目全部版本的依赖（Modrinth GET /v2/project/{id}/dependencies 形）。
+func (q *Queries) ListProjectDependencies(ctx context.Context, projectID string) ([]ListProjectDependenciesRow, error) {
+	rows, err := q.db.Query(ctx, listProjectDependencies, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectDependenciesRow
+	for rows.Next() {
+		var i ListProjectDependenciesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VersionID,
+			&i.DependencyType,
+			&i.ProjectID,
+			&i.DepVersionID,
+			&i.FileName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTeamMembers = `-- name: ListTeamMembers :many
 SELECT m.team_id, m.user_sub, COALESCE(u.username, '')::text AS username, m.role, m.created_at
 FROM team_members m LEFT JOIN users u ON u.sub = m.user_sub
@@ -884,6 +951,47 @@ func (q *Queries) ListUserTeams(ctx context.Context, userSub string) ([]ListUser
 			&i.Name,
 			&i.Role,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVersionDependencies = `-- name: ListVersionDependencies :many
+SELECT id, version_id, dependency_type, project_id, dep_version_id, file_name
+FROM version_dependencies WHERE version_id = $1 ORDER BY created_at ASC
+`
+
+type ListVersionDependenciesRow struct {
+	ID             string
+	VersionID      string
+	DependencyType string
+	ProjectID      string
+	DepVersionID   string
+	FileName       string
+}
+
+func (q *Queries) ListVersionDependencies(ctx context.Context, versionID string) ([]ListVersionDependenciesRow, error) {
+	rows, err := q.db.Query(ctx, listVersionDependencies, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVersionDependenciesRow
+	for rows.Next() {
+		var i ListVersionDependenciesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VersionID,
+			&i.DependencyType,
+			&i.ProjectID,
+			&i.DepVersionID,
+			&i.FileName,
 		); err != nil {
 			return nil, err
 		}
