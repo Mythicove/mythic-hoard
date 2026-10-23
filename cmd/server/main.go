@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,8 +68,17 @@ func main() {
 	r.Use(clientip.Middleware(ipResolver))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Logger)
+	origins := make([]string, 0, len(cfg.CORSOrigins))
+	for _, o := range cfg.CORSOrigins {
+		if o = strings.TrimSpace(o); o != "" {
+			origins = append(origins, o)
+		}
+	}
+	if len(origins) == 0 {
+		origins = []string{"*"}
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: false,

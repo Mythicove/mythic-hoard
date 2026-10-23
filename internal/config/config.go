@@ -31,6 +31,9 @@ type Config struct {
 	RateLimitRPS   float64 `env:"HOARD_RATE_LIMIT_RPS" envDefault:"100"`
 	RateLimitBurst int     `env:"HOARD_RATE_LIMIT_BURST" envDefault:"200"`
 
+	// CORS 允许来源（逗号分隔）；留空回退 "*"（仅建议开发环境）。
+	CORSOrigins []string `env:"HOARD_CORS_ORIGINS" envSeparator:","`
+
 	// 客户端 IP 解析：转发头顺序与可信代理网段（见 shared/clientip）。
 	// 留空 = 默认头序（XFF→X-Real-IP→CF-Connecting-IP→True-Client-IP）+ 默认信任私网/环回代理。
 	ClientIPHeaders   []string `env:"HOARD_CLIENT_IP_HEADERS" envSeparator:","`
