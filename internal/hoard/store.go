@@ -16,6 +16,8 @@ var (
 	ErrInvalid = errors.New("invalid input")
 	// ErrFileTooLarge 表示上传文件超出大小上限。
 	ErrFileTooLarge = errors.New("file too large")
+	// ErrForbidden 表示已登录但无权操作该资源。
+	ErrForbidden = errors.New("forbidden")
 )
 
 // User 是 OIDC 用户投影（sub = Mirror users.id，不建跨服务外键）。

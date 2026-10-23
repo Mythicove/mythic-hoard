@@ -30,6 +30,10 @@ func (s *Service) Register(r chi.Router, adminToken string) {
 		r.Delete("/api/user/pats/{id}", s.handleDeletePAT)
 		r.Post("/api/team/{id}/members", s.handleAddTeamMember)
 		r.Delete("/api/team/{id}/members/{sub}", s.handleRemoveTeamMember)
+		// 用户级上传（Modrinth 形 multipart；管理员 /api/mods 队列保留）
+		r.Post("/v2/project", s.handleUserCreateProject)
+		r.Post("/v2/version", s.handleUserAddVersion)
+		r.Delete("/v2/project/{id}", s.handleUserDeleteProject)
 	})
 
 	// 团队成员列表公开（与 Modrinth 一致）

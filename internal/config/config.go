@@ -14,6 +14,9 @@ type Config struct {
 	// MaxFileBytes 是单个 mod 文件大小上限（默认 512 MiB）。
 	MaxFileBytes int64 `env:"HOARD_MAX_FILE_BYTES" envDefault:"536870912"`
 
+	// RequireReview 开启后新上传项目为 under_review（管理员批准后公开）。
+	RequireReview bool `env:"HOARD_REQUIRE_REVIEW"`
+
 	// 存储：local / s3
 	StorageDriver string `env:"HOARD_STORAGE_DRIVER" envDefault:"local"`
 	S3Endpoint    string `env:"HOARD_S3_ENDPOINT"`

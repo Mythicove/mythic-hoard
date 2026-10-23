@@ -384,3 +384,108 @@ func randomSuffix() string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+// VersionInput 是一次独立发版的输入（POST /v2/version）。
+type VersionInput struct {
+	ProjectID     string
+	Name          string
+	VersionNumber string
+	VersionType   string
+	Changelog     string
+	Loaders       []string
+	GameVersions  []string
+	Filename      string
+	Data          io.Reader
+}
+
+// UserUpload 由登录用户创建项目：自动建团队（创建者为 owner）并归属项目。
+func (s *Service) UserUpload(ctx context.Context, u *User, in UploadInput) (*Project, error) {
+	proj, err := s.Upload(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	teamID, err := s.store.CreateTeam(ctx, proj.Title, u.Sub)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.SetProjectTeam(ctx, proj.ID, teamID); err != nil {
+		return nil, err
+	}
+	proj.TeamID = teamID
+	return proj, nil
+}
+
+// UserAddVersion 在用户有成员权的项目上发布新版本。
+func (s *Service) UserAddVersion(ctx context.Context, u *User, in VersionInput) (*Version, error) {
+	if err := s.checkProjectMember(ctx, u, in.ProjectID); err != nil {
+		return nil, err
+	}
+	if in.VersionNumber == "" || in.Filename == "" {
+		return nil, ErrInvalid
+	}
+	if in.VersionType == "" {
+		in.VersionType = "release"
+	}
+	storageKey, sha1sum, sha512sum, size, err := s.storeFile(ctx, in.Data)
+	if err != nil {
+		return nil, err
+	}
+	ver, err := s.store.CreateVersion(ctx, in.ProjectID, NewVersion{
+		Name:          in.Name,
+		VersionNumber: in.VersionNumber,
+		VersionType:   in.VersionType,
+		Changelog:     in.Changelog,
+		Loaders:       in.Loaders,
+		GameVersions:  in.GameVersions,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.store.CreateFile(ctx, ver.ID, NewFile{
+		Filename:   in.Filename,
+		Size:       size,
+		SHA1:       sha1sum,
+		SHA512:     sha512sum,
+		StorageKey: storageKey,
+		Primary:    true,
+	}); err != nil {
+		return nil, err
+	}
+	return ver, nil
+}
+
+// UserDeleteProject 删除项目（团队 owner 或站点 admin）。
+func (s *Service) UserDeleteProject(ctx context.Context, u *User, projectID string) error {
+	teamID, err := s.store.ProjectTeam(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	allowed := u.IsAdmin()
+	if !allowed && teamID != "" {
+		if m, err := s.store.GetTeamMember(ctx, teamID, u.Sub); err == nil && m.Role == "owner" {
+			allowed = true
+		}
+	}
+	if !allowed {
+		return ErrForbidden
+	}
+	return s.store.DeleteProject(ctx, projectID)
+}
+
+// checkProjectMember 校验用户是项目团队成员；无团队的存量项目仅站点 admin 可写。
+func (s *Service) checkProjectMember(ctx context.Context, u *User, projectID string) error {
+	teamID, err := s.store.ProjectTeam(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if u.IsAdmin() {
+		return nil
+	}
+	if teamID == "" {
+		return ErrForbidden
+	}
+	if _, err := s.store.GetTeamMember(ctx, teamID, u.Sub); err != nil {
+		return ErrForbidden
+	}
+	return nil
+}
