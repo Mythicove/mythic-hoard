@@ -17,11 +17,11 @@ import (
 	"github.com/Mythicove/mythic-hoard/internal/search"
 	hoardstorage "github.com/Mythicove/mythic-hoard/internal/storage"
 	"github.com/Mythicove/shared/queue"
+	"github.com/Mythicove/shared/ratelimit"
 	"github.com/Mythicove/shared/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -64,8 +64,9 @@ func main() {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
+	r.Use(hoard.SecurityHeaders())
 	if cfg.RateLimitRPS > 0 {
-		r.Use(hoard.RateLimit(rate.Limit(cfg.RateLimitRPS), cfg.RateLimitBurst))
+		r.Use(hoard.RateLimit(ratelimit.NewMemory(), cfg.RateLimitBurst, time.Second))
 	}
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -73,7 +74,14 @@ func main() {
 	})
 	svc.Register(r, cfg.AdminToken)
 
-	srv := &http.Server{Addr: cfg.ListenAddr, Handler: r}
+	srv := &http.Server{
+		Addr:    cfg.ListenAddr,
+		Handler: r,
+		// mod 上传/下载为流式长连接，不设 Read/WriteTimeout；
+		// 请求体大小由 ParseMultipartForm 上限约束，ReadHeaderTimeout 防 Slowloris。
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

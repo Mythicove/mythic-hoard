@@ -94,13 +94,27 @@ func TestUploadListDownloadMrpack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hasIndex := false
+	var index map[string]any
 	for _, f := range zr.File {
 		if f.Name == "modrinth.index.json" {
-			hasIndex = true
+			rc, _ := f.Open()
+			_ = json.NewDecoder(rc).Decode(&index)
+			rc.Close()
 		}
 	}
-	if !hasIndex {
+	if index == nil {
 		t.Fatal("mrpack missing modrinth.index.json")
+	}
+	deps, _ := index["dependencies"].(map[string]any)
+	if _, ok := deps["fabric-loader"]; !ok {
+		t.Fatalf("mrpack dependencies missing fabric-loader: %v", index["dependencies"])
+	}
+	mods, _ := index["files"].([]any)
+	if len(mods) != 1 {
+		t.Fatalf("mrpack files: %v", index["files"])
+	}
+	entry, _ := mods[0].(map[string]any)
+	if entry["path"] != "mods/mod.jar" {
+		t.Fatalf("mrpack file path = %v, want mods/mod.jar", entry["path"])
 	}
 }

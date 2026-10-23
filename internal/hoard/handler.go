@@ -183,10 +183,15 @@ func (s *Service) handleMrpack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMod := p.ProjectType == "mod"
 	files := make([]map[string]any, 0, len(v.Files))
 	for _, f := range v.Files {
+		path := f.Filename
+		if isMod {
+			path = "mods/" + f.Filename
+		}
 		files = append(files, map[string]any{
-			"path":      f.Filename,
+			"path":      path,
 			"hashes":    f.Hashes,
 			"downloads": []string{f.URL},
 			"fileSize":  f.Size,
@@ -198,6 +203,7 @@ func (s *Service) handleMrpack(w http.ResponseWriter, r *http.Request) {
 		"versionId":     v.VersionNumber,
 		"name":          p.Title,
 		"files":         files,
+		"dependencies":  mrpackDependencies(v.Loaders, p.Loaders),
 	}
 
 	w.Header().Set("Content-Type", "application/zip")
@@ -207,6 +213,31 @@ func (s *Service) handleMrpack(w http.ResponseWriter, r *http.Request) {
 	data, _ := json.Marshal(index)
 	_, _ = entry.Write(data)
 	_ = zw.Close()
+}
+
+// mrpackLoaderIDs 把项目 loader 名映射为 mrpack dependencies 的键。
+var mrpackLoaderIDs = map[string]string{
+	"fabric":     "fabric-loader",
+	"quilt":      "quilt-loader",
+	"forge":      "forge",
+	"neoforge":   "neoforge",
+	"liteloader": "liteloader",
+	"modloader":  "modloader",
+}
+
+// mrpackDependencies 从版本（优先）或项目的 loaders 生成 mrpack 必需的 dependencies 对象。
+func mrpackDependencies(versionLoaders, projectLoaders []string) map[string]any {
+	loaders := versionLoaders
+	if len(loaders) == 0 {
+		loaders = projectLoaders
+	}
+	deps := map[string]any{}
+	for _, l := range loaders {
+		if id, ok := mrpackLoaderIDs[strings.ToLower(l)]; ok {
+			deps[id] = map[string]string{"version": "*"}
+		}
+	}
+	return deps
 }
 
 func (s *Service) handleTagLoaders(w http.ResponseWriter, r *http.Request) {
