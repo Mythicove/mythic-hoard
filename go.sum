@@ -1,5 +1,5 @@
-github.com/Mythicove/shared v0.1.0 h1:c8tJcL6V0NvoCDEWA05E4G3wu7B59/nhMF7kN9afM1k=
-github.com/Mythicove/shared v0.1.0/go.mod h1:QYffi5FeKR2E3CqSGP9sADspj1S+Nv8C1+Do1SvD3wQ=
+github.com/Mythicove/shared v0.1.1 h1:BmG73tGLJb3KehVLNvaDD52v3akG7znRQHER8u+gMB0=
+github.com/Mythicove/shared v0.1.1/go.mod h1:QYffi5FeKR2E3CqSGP9sADspj1S+Nv8C1+Do1SvD3wQ=
 github.com/andybalholm/brotli v1.2.6 h1:ftYnfj6usCp+UGV5kSJ3+chpMQgU+gJf/AxsUQ52REI=
 github.com/andybalholm/brotli v1.2.6/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/aws/aws-sdk-go-v2 v1.47.3 h1:HRoT/MkNi3bjO5xF4dCzLzvVmkvRGHj3/cLINDnJejk=
