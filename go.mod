@@ -3,7 +3,7 @@ module github.com/Mythicove/mythic-hoard
 go 1.26.0
 
 require (
-	github.com/Mythicove/shared v0.1.1
+	github.com/Mythicove/shared v0.1.2
 	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/config v1.33.9
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.9

@@ -259,7 +259,7 @@ type SearchResult struct {
 // Search 列表/搜索项目（仅返回公开 listed 项目）。
 func (s *Service) Search(ctx context.Context, q string, f Filter, limit, offset int) (SearchResult, error) {
 	if s.search != nil {
-		ids, err := s.search.Query(ctx, "projects", q, map[string][]string{
+		ids, total, err := s.search.Query(ctx, "projects", q, map[string][]string{
 			"loaders":       f.Loaders,
 			"game_versions": f.GameVersions,
 			"categories":    f.Categories,
@@ -275,7 +275,7 @@ func (s *Service) Search(ctx context.Context, q string, f Filter, limit, offset 
 		for i := range projects {
 			s.fillIconURL(&projects[i])
 		}
-		return SearchResult{Hits: projects, Offset: offset, Limit: limit, TotalHits: int64(len(projects))}, nil
+		return SearchResult{Hits: projects, Offset: offset, Limit: limit, TotalHits: total}, nil
 	}
 	projects, total, err := s.store.Search(ctx, q, f, limit, offset)
 	if err != nil {

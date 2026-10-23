@@ -4,6 +4,7 @@ package search
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/Mythicove/shared/search"
 	"github.com/meilisearch/meilisearch-go"
@@ -45,12 +46,18 @@ func (m *Meili) Delete(_ context.Context, index, id string) error {
 	return err
 }
 
-func (m *Meili) Query(_ context.Context, index, q string, facets map[string][]string, limit, offset int) ([]string, error) {
+func (m *Meili) Query(_ context.Context, index, q string, facets map[string][]string, limit, offset int) ([]string, int64, error) {
+	// 同一 facet 键内 OR，键间 AND（Modrinth facets 内层 OR/外层 AND 语义）
 	filters := make([]string, 0, len(facets))
 	for k, vals := range facets {
-		for _, v := range vals {
-			filters = append(filters, k+" = "+v)
+		if len(vals) == 0 {
+			continue
 		}
+		conds := make([]string, 0, len(vals))
+		for _, v := range vals {
+			conds = append(conds, k+" = "+v)
+		}
+		filters = append(filters, "("+strings.Join(conds, " OR ")+")")
 	}
 	req := &meilisearch.SearchRequest{
 		Limit:  int64(limit),
@@ -59,7 +66,7 @@ func (m *Meili) Query(_ context.Context, index, q string, facets map[string][]st
 	}
 	res, err := m.client.Index(index).Search(q, req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	ids := make([]string, 0, len(res.Hits))
 	for _, h := range res.Hits {
@@ -72,5 +79,5 @@ func (m *Meili) Query(_ context.Context, index, q string, facets map[string][]st
 			ids = append(ids, id)
 		}
 	}
-	return ids, nil
+	return ids, int64(res.EstimatedTotalHits), nil
 }

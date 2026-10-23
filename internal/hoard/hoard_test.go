@@ -145,3 +145,26 @@ func TestUploadFileTooLarge(t *testing.T) {
 		t.Fatalf("oversize upload status %d, want 413", resp.StatusCode)
 	}
 }
+
+func TestParseFacets(t *testing.T) {
+	var f Filter
+	parseFacets(`[["versions:1.20.1","versions:1.19"],["loaders:fabric"],["project_type:mod"],["categories:tech"]]`, &f)
+	if len(f.GameVersions) != 2 || f.GameVersions[0] != "1.20.1" || f.GameVersions[1] != "1.19" {
+		t.Fatalf("versions: %+v", f.GameVersions)
+	}
+	if len(f.Loaders) != 1 || f.Loaders[0] != "fabric" {
+		t.Fatalf("loaders: %+v", f.Loaders)
+	}
+	if len(f.ProjectTypes) != 1 || f.ProjectTypes[0] != "mod" {
+		t.Fatalf("types: %+v", f.ProjectTypes)
+	}
+	if len(f.Categories) != 1 || f.Categories[0] != "tech" {
+		t.Fatalf("categories: %+v", f.Categories)
+	}
+	var f2 Filter
+	parseFacets(`not json`, &f2)
+	parseFacets(`[["noseparator"]]`, &f2)
+	if len(f2.Loaders)+len(f2.GameVersions) != 0 {
+		t.Fatalf("bad facets leaked: %+v", f2)
+	}
+}
