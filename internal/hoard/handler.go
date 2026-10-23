@@ -65,9 +65,12 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 		Data:          f,
 	})
 	if err != nil {
-		if err == ErrInvalid {
+		switch {
+		case err == ErrInvalid:
 			http.Error(w, "title and file are required", http.StatusBadRequest)
-		} else {
+		case err == ErrFileTooLarge:
+			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		return

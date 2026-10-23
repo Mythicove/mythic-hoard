@@ -118,3 +118,30 @@ func TestUploadListDownloadMrpack(t *testing.T) {
 		t.Fatalf("mrpack file path = %v, want mods/mod.jar", entry["path"])
 	}
 }
+
+func TestUploadFileTooLarge(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetMaxFileBytes(10)
+	r := chi.NewRouter()
+	svc.Register(r, "")
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	body := &bytes.Buffer{}
+	mw := multipart.NewWriter(body)
+	_ = mw.WriteField("title", "Big Mod")
+	_ = mw.WriteField("project_type", "mod")
+	_ = mw.WriteField("version_number", "1.0.0")
+	fw, _ := mw.CreateFormFile("file", "mod.jar")
+	_, _ = fw.Write(bytes.Repeat([]byte("x"), 100))
+	_ = mw.Close()
+
+	resp, err := http.Post(srv.URL+"/api/mods", mw.FormDataContentType(), body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversize upload status %d, want 413", resp.StatusCode)
+	}
+}

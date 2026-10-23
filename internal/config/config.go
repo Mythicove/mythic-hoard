@@ -11,6 +11,9 @@ type Config struct {
 	DataDir     string `env:"HOARD_DATA_DIR" envDefault:"data/files"`
 	DatabaseURL string `env:"HOARD_DATABASE_URL"`
 
+	// MaxFileBytes 是单个 mod 文件大小上限（默认 512 MiB）。
+	MaxFileBytes int64 `env:"HOARD_MAX_FILE_BYTES" envDefault:"536870912"`
+
 	// 存储：local / s3
 	StorageDriver string `env:"HOARD_STORAGE_DRIVER" envDefault:"local"`
 	S3Endpoint    string `env:"HOARD_S3_ENDPOINT"`

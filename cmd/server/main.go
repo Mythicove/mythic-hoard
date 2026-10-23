@@ -51,6 +51,7 @@ func main() {
 	}
 
 	svc := hoard.NewService(store, files, cfg.BaseURL)
+	svc.SetMaxFileBytes(cfg.MaxFileBytes)
 	if cfg.SearchDriver == "meili" && cfg.MeiliURL != "" {
 		svc.SetSearch(search.NewMeili(cfg.MeiliURL, cfg.MeiliAPIKey))
 	}

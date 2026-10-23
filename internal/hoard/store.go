@@ -13,6 +13,8 @@ var (
 	ErrAlreadyExists = errors.New("already exists")
 	// ErrInvalid 表示输入非法。
 	ErrInvalid = errors.New("invalid input")
+	// ErrFileTooLarge 表示上传文件超出大小上限。
+	ErrFileTooLarge = errors.New("file too large")
 )
 
 // Project 对应 Modrinth 的 project。

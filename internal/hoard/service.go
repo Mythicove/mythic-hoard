@@ -25,11 +25,24 @@ type Service struct {
 	queue         queue.Queue
 	baseURL       string
 	requireReview bool
+	maxFileBytes  int64
 }
+
+// DefaultMaxFileBytes 是单个 mod 文件的默认大小上限（512 MiB）。
+const DefaultMaxFileBytes = 512 << 20
 
 // NewService 构造服务。
 func NewService(store Store, files storage.Storage, baseURL string) *Service {
-	return &Service{store: store, files: files, baseURL: strings.TrimRight(baseURL, "/")}
+	return &Service{store: store, files: files, baseURL: strings.TrimRight(baseURL, "/"), maxFileBytes: DefaultMaxFileBytes}
+}
+
+// SetMaxFileBytes 设置单文件大小上限（<=0 恢复默认）。
+func (s *Service) SetMaxFileBytes(n int64) {
+	if n > 0 {
+		s.maxFileBytes = n
+	} else {
+		s.maxFileBytes = DefaultMaxFileBytes
+	}
 }
 
 // SetSearch 设置搜索后端（可选，nil 表示使用 Store 内置 pg_trgm 查询）。
@@ -140,9 +153,12 @@ func (s *Service) storeFile(ctx context.Context, r io.Reader) (key, sha1sum, sha
 
 	h1 := sha1.New()
 	h512 := sha512.New()
-	n, err := io.Copy(io.MultiWriter(tmp, h1, h512), r)
+	n, err := io.Copy(io.MultiWriter(tmp, h1, h512), io.LimitReader(r, s.maxFileBytes+1))
 	if err != nil {
 		return "", "", "", 0, err
+	}
+	if n > s.maxFileBytes {
+		return "", "", "", 0, ErrFileTooLarge
 	}
 	size = n
 	sha1sum = hex.EncodeToString(h1.Sum(nil))
