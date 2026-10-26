@@ -1,4 +1,8 @@
 -- +goose Up
+-- 同库部署（compose 混合站）下与 mirror 的 public 表隔离：hoard 全部对象进 hoard schema
+--（连接 search_path 由 HOARD_DATABASE_URL 的 options 指定）；独立库部署同样适用。
+CREATE SCHEMA IF NOT EXISTS hoard;
+
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE projects (
