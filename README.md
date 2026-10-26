@@ -16,7 +16,7 @@
 - **搜索双实现**：`pg_trgm`（默认，含精确总数）/ Meilisearch（首次访问自动开通索引：filterableAttributes + `maxTotalHits=1e6` 使总数精确）；队列 inline / asynq
 - **管理侧**：管理员 token 的 legacy 上传、审核状态流转（`listed|under_review|rejected|archived`）、删除；`HOARD_REQUIRE_REVIEW` 可强制新上传进审核
 
-未做：**团队邀请的接受/拒绝流**（当前 owner 直接加人，无 pending 邀请态）、上游镜像代理、画廊/截图。内容举报与皮肤审核队列在 **Mirror**（`POST /reports`、`/api/admin/reports*`、`/api/admin/skins*`），不在本仓库。完整差距见 `docs/plans/status.md`。
+未做：上游镜像代理、画廊/截图；成员角色变更/所有权移交有端点但暂无 UI。内容举报与皮肤审核队列在 **Mirror**（`POST /reports`、`/api/admin/reports*`、`/api/admin/skins*`），不在本仓库。完整差距见 `docs/plans/status.md`。
 
 ## 端点
 
@@ -42,8 +42,14 @@
 |---|---|---|
 | POST | `/api/team` | 创建团队（创建者即 owner） |
 | GET | `/api/user/teams` | 我的团队 |
-| POST | `/api/team/{id}/members` | 加成员/改角色（owner 或站点管理员）；把唯一 owner 降级 → 409 |
+| POST | `/api/team/{id}/members` | 变更**已有成员**角色 / 移交所有权（owner 或站点管理员）；非成员 → 409（改用邀请）；唯一 owner 降级 → 409 |
 | DELETE | `/api/team/{id}/members/{sub}` | 移除成员或自己退出；唯一 owner 退出 → 409（须先移交） |
+| POST | `/api/team/{id}/invites` | 邀请用户加入（owner 或站点管理员）；已是成员 → 409 |
+| GET | `/api/team/{id}/invites` | 团队的待处理邀请 |
+| DELETE | `/api/team/{id}/invites/{sub}` | 撤回邀请 |
+| GET | `/api/user/invites` | 我收到的待处理邀请 |
+| POST | `/api/user/invites/{teamId}/accept` | 接受邀请（写入成员并消费邀请） |
+| DELETE | `/api/user/invites/{teamId}` | 拒绝邀请 |
 | GET | `/api/user/pats` | 我的令牌（不含明文） |
 | POST | `/api/user/pats` | 创建令牌（明文只返回一次） |
 | DELETE | `/api/user/pats/{id}` | 撤销令牌 |
