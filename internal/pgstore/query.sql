@@ -138,6 +138,28 @@ SELECT m.team_id, COALESCE(tm.name, '')::text AS name, m.role, m.created_at
 FROM team_members m JOIN teams tm ON tm.id = m.team_id
 WHERE m.user_sub = $1 ORDER BY m.created_at ASC;
 
+-- name: UpsertTeamInvite :execrows
+INSERT INTO team_invites (team_id, user_sub, role, invited_by) VALUES ($1, $2, $3, $4)
+ON CONFLICT (team_id, user_sub) DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by;
+
+-- name: DeleteTeamInvite :execrows
+DELETE FROM team_invites WHERE team_id = $1 AND user_sub = $2;
+
+-- name: GetTeamInvite :one
+SELECT i.team_id, i.user_sub, COALESCE(u.username, '')::text AS username, i.role, i.invited_by, i.created_at
+FROM team_invites i LEFT JOIN users u ON u.sub = i.user_sub
+WHERE i.team_id = $1 AND i.user_sub = $2;
+
+-- name: ListTeamInvites :many
+SELECT i.team_id, i.user_sub, COALESCE(u.username, '')::text AS username, i.role, i.invited_by, i.created_at
+FROM team_invites i LEFT JOIN users u ON u.sub = i.user_sub
+WHERE i.team_id = $1 ORDER BY i.created_at ASC;
+
+-- name: ListInvitesForUser :many
+SELECT i.team_id, COALESCE(t.name, '')::text AS team_name, i.role, i.invited_by, i.created_at
+FROM team_invites i JOIN teams t ON t.id = i.team_id
+WHERE i.user_sub = $1 ORDER BY i.created_at ASC;
+
 -- name: SetProjectTeam :execrows
 UPDATE projects SET team_id = $2 WHERE id = $1;
 

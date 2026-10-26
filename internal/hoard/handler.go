@@ -30,6 +30,13 @@ func (s *Service) Register(r chi.Router, adminToken string) {
 		r.Delete("/api/user/pats/{id}", s.handleDeletePAT)
 		r.Post("/api/team/{id}/members", s.handleAddTeamMember)
 		r.Delete("/api/team/{id}/members/{sub}", s.handleRemoveTeamMember)
+		// 团队邀请（加入需被邀请人同意）
+		r.Post("/api/team/{id}/invites", s.handleInviteMember)
+		r.Get("/api/team/{id}/invites", s.handleListTeamInvites)
+		r.Delete("/api/team/{id}/invites/{sub}", s.handleRevokeTeamInvite)
+		r.Get("/api/user/invites", s.handleListMyInvites)
+		r.Post("/api/user/invites/{teamId}/accept", s.handleAcceptInvite)
+		r.Delete("/api/user/invites/{teamId}", s.handleRejectInvite)
 		// 用户级上传（Modrinth 形 multipart；管理员 /api/mods 队列保留）
 		r.Post("/v2/project", s.handleUserCreateProject)
 		r.Post("/v2/version", s.handleUserAddVersion)

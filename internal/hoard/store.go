@@ -49,6 +49,25 @@ type UserTeam struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// TeamInvite 是团队管理者视角的待处理邀请（username 为投影联查结果）。
+type TeamInvite struct {
+	TeamID    string `json:"team_id"`
+	UserSub   string `json:"user_sub"`
+	Username  string `json:"username"`
+	Role      string `json:"role"` // owner | member（接受后写入 team_members）
+	InvitedBy string `json:"invited_by"`
+	CreatedAt string `json:"created_at"`
+}
+
+// UserInvite 是被邀请人视角的待处理邀请（带团队名，供"我的邀请"列表）。
+type UserInvite struct {
+	TeamID    string `json:"team_id"`
+	TeamName  string `json:"team_name"`
+	Role      string `json:"role"`
+	InvitedBy string `json:"invited_by"`
+	CreatedAt string `json:"created_at"`
+}
+
 // PAT 是个人访问令牌元数据（永不含明文）。
 type PAT struct {
 	ID        string   `json:"id"`
@@ -220,6 +239,12 @@ type Store interface {
 	GetTeamMember(ctx context.Context, teamID, userSub string) (*TeamMember, error)
 	ListTeamMembers(ctx context.Context, teamID string) ([]TeamMember, error)
 	ListUserTeams(ctx context.Context, userSub string) ([]UserTeam, error)
+	// 团队邀请：加入需被邀请人同意。行存在即 pending，接受/拒绝/撤销都删除该行。
+	UpsertTeamInvite(ctx context.Context, teamID, userSub, role, invitedBy string) error
+	DeleteTeamInvite(ctx context.Context, teamID, userSub string) error
+	GetTeamInvite(ctx context.Context, teamID, userSub string) (*TeamInvite, error)
+	ListTeamInvites(ctx context.Context, teamID string) ([]TeamInvite, error)
+	ListInvitesForUser(ctx context.Context, userSub string) ([]UserInvite, error)
 	SetProjectTeam(ctx context.Context, projectID, teamID string) error
 	ProjectTeam(ctx context.Context, projectID string) (string, error)
 	SetProjectIcon(ctx context.Context, projectID, iconKey string) error

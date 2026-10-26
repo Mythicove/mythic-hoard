@@ -381,6 +381,23 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const deleteTeamInvite = `-- name: DeleteTeamInvite :execrows
+DELETE FROM team_invites WHERE team_id = $1 AND user_sub = $2
+`
+
+type DeleteTeamInviteParams struct {
+	TeamID  string
+	UserSub string
+}
+
+func (q *Queries) DeleteTeamInvite(ctx context.Context, arg DeleteTeamInviteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteTeamInvite, arg.TeamID, arg.UserSub)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getPATByHash = `-- name: GetPATByHash :one
 SELECT p.id, p.user_sub, p.name, p.scopes, p.expires_at, u.username, u.role
 FROM personal_access_tokens p JOIN users u ON u.sub = p.user_sub
@@ -576,6 +593,40 @@ func (q *Queries) GetSession(ctx context.Context, id string) (GetSessionRow, err
 	return i, err
 }
 
+const getTeamInvite = `-- name: GetTeamInvite :one
+SELECT i.team_id, i.user_sub, COALESCE(u.username, '')::text AS username, i.role, i.invited_by, i.created_at
+FROM team_invites i LEFT JOIN users u ON u.sub = i.user_sub
+WHERE i.team_id = $1 AND i.user_sub = $2
+`
+
+type GetTeamInviteParams struct {
+	TeamID  string
+	UserSub string
+}
+
+type GetTeamInviteRow struct {
+	TeamID    string
+	UserSub   string
+	Username  string
+	Role      string
+	InvitedBy string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetTeamInvite(ctx context.Context, arg GetTeamInviteParams) (GetTeamInviteRow, error) {
+	row := q.db.QueryRow(ctx, getTeamInvite, arg.TeamID, arg.UserSub)
+	var i GetTeamInviteRow
+	err := row.Scan(
+		&i.TeamID,
+		&i.UserSub,
+		&i.Username,
+		&i.Role,
+		&i.InvitedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getTeamMember = `-- name: GetTeamMember :one
 SELECT m.team_id, m.user_sub, COALESCE(u.username, '')::text AS username, m.role, m.created_at
 FROM team_members m LEFT JOIN users u ON u.sub = m.user_sub
@@ -763,6 +814,46 @@ func (q *Queries) ListGameVersions(ctx context.Context) ([]string, error) {
 	return items, nil
 }
 
+const listInvitesForUser = `-- name: ListInvitesForUser :many
+SELECT i.team_id, COALESCE(t.name, '')::text AS team_name, i.role, i.invited_by, i.created_at
+FROM team_invites i JOIN teams t ON t.id = i.team_id
+WHERE i.user_sub = $1 ORDER BY i.created_at ASC
+`
+
+type ListInvitesForUserRow struct {
+	TeamID    string
+	TeamName  string
+	Role      string
+	InvitedBy string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListInvitesForUser(ctx context.Context, userSub string) ([]ListInvitesForUserRow, error) {
+	rows, err := q.db.Query(ctx, listInvitesForUser, userSub)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInvitesForUserRow
+	for rows.Next() {
+		var i ListInvitesForUserRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.TeamName,
+			&i.Role,
+			&i.InvitedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLoaders = `-- name: ListLoaders :many
 SELECT name FROM loaders ORDER BY name
 `
@@ -862,6 +953,48 @@ func (q *Queries) ListProjectDependencies(ctx context.Context, projectID string)
 			&i.ProjectID,
 			&i.DepVersionID,
 			&i.FileName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamInvites = `-- name: ListTeamInvites :many
+SELECT i.team_id, i.user_sub, COALESCE(u.username, '')::text AS username, i.role, i.invited_by, i.created_at
+FROM team_invites i LEFT JOIN users u ON u.sub = i.user_sub
+WHERE i.team_id = $1 ORDER BY i.created_at ASC
+`
+
+type ListTeamInvitesRow struct {
+	TeamID    string
+	UserSub   string
+	Username  string
+	Role      string
+	InvitedBy string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListTeamInvites(ctx context.Context, teamID string) ([]ListTeamInvitesRow, error) {
+	rows, err := q.db.Query(ctx, listTeamInvites, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTeamInvitesRow
+	for rows.Next() {
+		var i ListTeamInvitesRow
+		if err := rows.Scan(
+			&i.TeamID,
+			&i.UserSub,
+			&i.Username,
+			&i.Role,
+			&i.InvitedBy,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1250,6 +1383,31 @@ INSERT INTO loaders (name) VALUES ($1) ON CONFLICT (name) DO NOTHING
 func (q *Queries) UpsertLoader(ctx context.Context, name string) error {
 	_, err := q.db.Exec(ctx, upsertLoader, name)
 	return err
+}
+
+const upsertTeamInvite = `-- name: UpsertTeamInvite :execrows
+INSERT INTO team_invites (team_id, user_sub, role, invited_by) VALUES ($1, $2, $3, $4)
+ON CONFLICT (team_id, user_sub) DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by
+`
+
+type UpsertTeamInviteParams struct {
+	TeamID    string
+	UserSub   string
+	Role      string
+	InvitedBy string
+}
+
+func (q *Queries) UpsertTeamInvite(ctx context.Context, arg UpsertTeamInviteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertTeamInvite,
+		arg.TeamID,
+		arg.UserSub,
+		arg.Role,
+		arg.InvitedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertUser = `-- name: UpsertUser :exec

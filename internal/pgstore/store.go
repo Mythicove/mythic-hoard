@@ -474,6 +474,72 @@ func (s *Store) ListUserTeams(ctx context.Context, userSub string) ([]hoard.User
 	return out, nil
 }
 
+func (s *Store) UpsertTeamInvite(ctx context.Context, teamID, userSub, role, invitedBy string) error {
+	_, err := s.q.UpsertTeamInvite(ctx, db.UpsertTeamInviteParams{
+		TeamID: teamID, UserSub: userSub, Role: role, InvitedBy: invitedBy,
+	})
+	if err != nil {
+		// 目标用户不存在（外键）→ 404，而不是把 DB 细节漏给调用方
+		return err
+	}
+	return nil
+}
+
+func (s *Store) DeleteTeamInvite(ctx context.Context, teamID, userSub string) error {
+	n, err := s.q.DeleteTeamInvite(ctx, db.DeleteTeamInviteParams{TeamID: teamID, UserSub: userSub})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return hoard.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetTeamInvite(ctx context.Context, teamID, userSub string) (*hoard.TeamInvite, error) {
+	row, err := s.q.GetTeamInvite(ctx, db.GetTeamInviteParams{TeamID: teamID, UserSub: userSub})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, hoard.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &hoard.TeamInvite{
+		TeamID: row.TeamID, UserSub: row.UserSub, Username: row.Username,
+		Role: row.Role, InvitedBy: row.InvitedBy, CreatedAt: ts(row.CreatedAt),
+	}, nil
+}
+
+func (s *Store) ListTeamInvites(ctx context.Context, teamID string) ([]hoard.TeamInvite, error) {
+	rows, err := s.q.ListTeamInvites(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hoard.TeamInvite, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, hoard.TeamInvite{
+			TeamID: r.TeamID, UserSub: r.UserSub, Username: r.Username,
+			Role: r.Role, InvitedBy: r.InvitedBy, CreatedAt: ts(r.CreatedAt),
+		})
+	}
+	return out, nil
+}
+
+func (s *Store) ListInvitesForUser(ctx context.Context, userSub string) ([]hoard.UserInvite, error) {
+	rows, err := s.q.ListInvitesForUser(ctx, userSub)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]hoard.UserInvite, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, hoard.UserInvite{
+			TeamID: r.TeamID, TeamName: r.TeamName,
+			Role: r.Role, InvitedBy: r.InvitedBy, CreatedAt: ts(r.CreatedAt),
+		})
+	}
+	return out, nil
+}
+
 func (s *Store) SetProjectTeam(ctx context.Context, projectID, teamID string) error {
 	n, err := s.q.SetProjectTeam(ctx, db.SetProjectTeamParams{ID: projectID, TeamID: pgtype.Text{String: teamID, Valid: teamID != ""}})
 	if err != nil {

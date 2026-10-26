@@ -29,6 +29,7 @@ type memTeam struct {
 	name      string
 	createdAt time.Time
 	members   map[string]*TeamMember // user_sub -> member
+	invites   map[string]*TeamInvite // user_sub -> 待处理邀请
 }
 
 type memPAT struct {
@@ -401,8 +402,92 @@ func (s *MemoryStore) CreateTeam(_ context.Context, name, ownerSub string) (stri
 			TeamID: id, UserSub: ownerSub, Username: s.users[ownerSub].Username,
 			Role: "owner", CreatedAt: now.Format(time.RFC3339),
 		}},
+		invites: map[string]*TeamInvite{},
 	}
 	return id, nil
+}
+
+// 团队邀请（内存实现）：行存在即 pending，接受/拒绝/撤销都删除。
+
+func (s *MemoryStore) UpsertTeamInvite(_ context.Context, teamID, userSub, role, invitedBy string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return ErrNotFound
+	}
+	u, ok := s.users[userSub]
+	if !ok {
+		return ErrNotFound
+	}
+	if team.invites == nil {
+		team.invites = map[string]*TeamInvite{}
+	}
+	team.invites[userSub] = &TeamInvite{
+		TeamID: teamID, UserSub: userSub, Username: u.Username,
+		Role: role, InvitedBy: invitedBy, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	return nil
+}
+
+func (s *MemoryStore) DeleteTeamInvite(_ context.Context, teamID, userSub string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return ErrNotFound
+	}
+	if _, ok := team.invites[userSub]; !ok {
+		return ErrNotFound
+	}
+	delete(team.invites, userSub)
+	return nil
+}
+
+func (s *MemoryStore) GetTeamInvite(_ context.Context, teamID, userSub string) (*TeamInvite, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	inv, ok := team.invites[userSub]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	cp := *inv
+	return &cp, nil
+}
+
+func (s *MemoryStore) ListTeamInvites(_ context.Context, teamID string) ([]TeamInvite, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	team, ok := s.teams[teamID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	out := make([]TeamInvite, 0, len(team.invites))
+	for _, inv := range team.invites {
+		out = append(out, *inv)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
+	return out, nil
+}
+
+func (s *MemoryStore) ListInvitesForUser(_ context.Context, userSub string) ([]UserInvite, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []UserInvite
+	for id, team := range s.teams {
+		if inv, ok := team.invites[userSub]; ok {
+			out = append(out, UserInvite{
+				TeamID: id, TeamName: team.name,
+				Role: inv.Role, InvitedBy: inv.InvitedBy, CreatedAt: inv.CreatedAt,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
+	return out, nil
 }
 
 func (s *MemoryStore) AddTeamMember(_ context.Context, teamID, userSub, role string) error {

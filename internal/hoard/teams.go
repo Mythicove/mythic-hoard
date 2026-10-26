@@ -129,7 +129,12 @@ func (s *Service) handleAddTeamMember(w http.ResponseWriter, r *http.Request) {
 	if req.Role != "owner" && req.Role != "member" {
 		req.Role = "member"
 	}
-	// 降级唯一 owner 等同把团队变成孤儿
+	// 新增成员一律走邀请（需被邀请人同意）；本端点只改**已有成员**的角色，
+	// 含所有权移交（role=owner）。末位 owner 降级仍被拒绝。
+	if _, err := s.store.GetTeamMember(r.Context(), teamID, req.Sub); err != nil {
+		http.Error(w, "not a member; invite them first", http.StatusConflict)
+		return
+	}
 	if req.Role != "owner" {
 		if existing, err := s.store.GetTeamMember(r.Context(), teamID, req.Sub); err == nil && existing.Role == "owner" {
 			last, err := s.isLastOwner(r.Context(), teamID, req.Sub)
@@ -173,6 +178,129 @@ func (s *Service) handleRemoveTeamMember(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.store.RemoveTeamMember(r.Context(), teamID, sub); err != nil {
+		if err == ErrNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleInviteMember 邀请用户加入团队（owner 或站点管理员）。
+// 加入需被邀请人同意，故这里只写待处理邀请，不直接落 team_members。
+func (s *Service) handleInviteMember(w http.ResponseWriter, r *http.Request) {
+	teamID := chi.URLParam(r, "id")
+	if !s.canManageTeam(r, teamID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var req struct {
+		Sub  string `json:"sub"`
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Sub == "" {
+		http.Error(w, "sub required", http.StatusBadRequest)
+		return
+	}
+	if req.Role != "owner" && req.Role != "member" {
+		req.Role = "member"
+	}
+	if _, err := s.store.GetTeamMember(r.Context(), teamID, req.Sub); err == nil {
+		http.Error(w, "already a member", http.StatusConflict)
+		return
+	}
+	u := UserFromContext(r.Context())
+	if err := s.store.UpsertTeamInvite(r.Context(), teamID, req.Sub, req.Role, u.Sub); err != nil {
+		if err == ErrNotFound {
+			http.Error(w, "team or user not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleListTeamInvites 列出团队的待处理邀请（owner 或站点管理员）。
+func (s *Service) handleListTeamInvites(w http.ResponseWriter, r *http.Request) {
+	teamID := chi.URLParam(r, "id")
+	if !s.canManageTeam(r, teamID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	invites, err := s.store.ListTeamInvites(r.Context(), teamID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if invites == nil {
+		invites = []TeamInvite{}
+	}
+	writeJSON(w, http.StatusOK, invites)
+}
+
+// handleRevokeTeamInvite 撤回一条待处理邀请。
+func (s *Service) handleRevokeTeamInvite(w http.ResponseWriter, r *http.Request) {
+	teamID := chi.URLParam(r, "id")
+	sub := chi.URLParam(r, "sub")
+	if !s.canManageTeam(r, teamID) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if err := s.store.DeleteTeamInvite(r.Context(), teamID, sub); err != nil {
+		if err == ErrNotFound {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleListMyInvites 列出我收到的待处理邀请。
+func (s *Service) handleListMyInvites(w http.ResponseWriter, r *http.Request) {
+	u := UserFromContext(r.Context())
+	invites, err := s.store.ListInvitesForUser(r.Context(), u.Sub)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if invites == nil {
+		invites = []UserInvite{}
+	}
+	writeJSON(w, http.StatusOK, invites)
+}
+
+// handleAcceptInvite 接受邀请：写入成员（角色取邀请值）并消费掉该邀请。
+func (s *Service) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
+	teamID := chi.URLParam(r, "teamId")
+	u := UserFromContext(r.Context())
+	inv, err := s.store.GetTeamInvite(r.Context(), teamID, u.Sub)
+	if err == ErrNotFound {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.store.AddTeamMember(r.Context(), teamID, u.Sub, inv.Role); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// 邀请是一次性的；成员已写入，删除失败不应让整个请求失败（下次列表自然不再显示）
+	_ = s.store.DeleteTeamInvite(r.Context(), teamID, u.Sub)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRejectInvite 拒绝邀请（删除待处理行）。
+func (s *Service) handleRejectInvite(w http.ResponseWriter, r *http.Request) {
+	teamID := chi.URLParam(r, "teamId")
+	u := UserFromContext(r.Context())
+	if err := s.store.DeleteTeamInvite(r.Context(), teamID, u.Sub); err != nil {
 		if err == ErrNotFound {
 			http.NotFound(w, r)
 			return
