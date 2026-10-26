@@ -58,7 +58,9 @@
 | DELETE | `/v2/project/{id}` | 删除自己的项目 |
 | GET | `/api/team/{id}/members` | 团队成员（公开读） |
 
-### 管理（`HOARD_ADMIN_TOKEN` Bearer；空 token = 禁用）
+### 管理（`role=admin` 的登录会话 **或** `HOARD_ADMIN_TOKEN` Bearer）
+
+两种凭据等价，与 Mirror 的后台一致：日常用 SSO 登录态（`HOARD_ADMIN_SUBJECTS` 映射为 admin），静态令牌只作 bootstrap/救援。**fail closed**：令牌留空不再等于开放管理端点，此时只有 admin 会话能通过。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
