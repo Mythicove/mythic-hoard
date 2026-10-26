@@ -4,6 +4,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 
 	"github.com/Mythicove/mythic-hoard/migrations"
@@ -38,6 +39,13 @@ func Run(dsn string) error {
 	//nolint:errcheck // 连接关闭时锁自动释放；显式解锁仅为尽早释放。
 	defer conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", advisoryLockKey)
 
+	// goose 的版本表建在 search_path 的首个可用 schema 中，而该 schema 本身由迁移创建 —— 鸡生蛋：
+	// DSN 带 options=-csearch_path=hoard（与 mirror 共库时的 schema 隔离）而 schema 尚不存在时，
+	// goose 建表会失败（ERROR: no schema has been selected to create in, SQLSTATE 3F000）。
+	if err := ensureSearchPathSchemas(ctx, conn); err != nil {
+		return err
+	}
+
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
@@ -45,4 +53,24 @@ func Run(dsn string) error {
 	// 与 Mirror 共享同一 Postgres：使用独立版本表避免冲突。
 	goose.SetTableName("hoard_goose_version")
 	return goose.Up(db, ".")
+}
+
+// ensureSearchPathSchemas 为 search_path 中尚不存在的 schema 执行 CREATE SCHEMA IF NOT EXISTS。
+// schema 名取自连接的实际 search_path（不硬编码），跳过 "$user" 这类占位项；已存在的为 no-op。
+func ensureSearchPathSchemas(ctx context.Context, conn *sql.Conn) error {
+	var searchPath string
+	if err := conn.QueryRowContext(ctx, "SHOW search_path").Scan(&searchPath); err != nil {
+		return err
+	}
+	for _, raw := range strings.Split(searchPath, ",") {
+		name := strings.TrimSpace(strings.Trim(raw, `"`))
+		if name == "" || strings.Contains(name, "$") {
+			continue
+		}
+		stmt := `CREATE SCHEMA IF NOT EXISTS "` + strings.ReplaceAll(name, `"`, `""`) + `"`
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
