@@ -223,11 +223,63 @@ func TestTeamsAndPATHTTP(t *testing.T) {
 	if res2.StatusCode != http.StatusForbidden {
 		t.Fatalf("non-owner add member: %d", res2.StatusCode)
 	}
-	// owner 添加成功
+	// 直接加人已被邀请流取代：非成员走 members 端点 → 409
 	res = do(http.MethodPost, "/api/team/"+created.ID+"/members", `{"sub":"http-u2","role":"member"}`, true, "")
 	res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("direct add should require an invite: %d", res.StatusCode)
+	}
+	// owner 邀请 → 204
+	res = do(http.MethodPost, "/api/team/"+created.ID+"/invites", `{"sub":"http-u2","role":"member"}`, true, "")
+	res.Body.Close()
 	if res.StatusCode != http.StatusNoContent {
-		t.Fatalf("owner add member: %d", res.StatusCode)
+		t.Fatalf("owner invite: %d", res.StatusCode)
+	}
+	// 受邀人看到邀请并接受
+	asU2 := func(method, path string) *http.Response {
+		req, err := http.NewRequest(method, srv.URL+path, strings.NewReader(""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.AddCookie(&http.Cookie{Name: SessionCookie, Value: sid2})
+		out, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	res3 := asU2(http.MethodGet, "/api/user/invites")
+	var invites []UserInvite
+	_ = json.NewDecoder(res3.Body).Decode(&invites)
+	res3.Body.Close()
+	if len(invites) != 1 || invites[0].TeamID != created.ID || invites[0].Role != "member" {
+		t.Fatalf("my invites: %+v", invites)
+	}
+	res4 := asU2(http.MethodPost, "/api/user/invites/"+created.ID+"/accept")
+	res4.Body.Close()
+	if res4.StatusCode != http.StatusNoContent {
+		t.Fatalf("accept invite: %d", res4.StatusCode)
+	}
+	// 接受后邀请被消费，成员列表含 http-u2
+	res5 := asU2(http.MethodGet, "/api/user/invites")
+	var after []UserInvite
+	_ = json.NewDecoder(res5.Body).Decode(&after)
+	res5.Body.Close()
+	if len(after) != 0 {
+		t.Fatalf("invite not consumed: %+v", after)
+	}
+	res = do(http.MethodGet, "/api/team/"+created.ID+"/members", "", true, "")
+	var members []TeamMember
+	_ = json.NewDecoder(res.Body).Decode(&members)
+	res.Body.Close()
+	found := false
+	for _, m := range members {
+		if m.UserSub == "http-u2" && m.Role == "member" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("accepted member missing: %+v", members)
 	}
 }
 
@@ -284,11 +336,27 @@ func TestTeamLastOwnerGuard(t *testing.T) {
 	if res.StatusCode != http.StatusConflict {
 		t.Fatalf("last owner demote: %d", res.StatusCode)
 	}
-	// 移交所有权（新增第二个 owner）后，原 owner 可退出 → 204
-	res = do(http.MethodPost, members, `{"sub":"lo-dev","role":"owner"}`)
+	// 移交所有权：邀请 lo-dev 为 owner，由其接受后原 owner 才可退出
+	res = do(http.MethodPost, "/api/team/"+created.ID+"/invites", `{"sub":"lo-dev","role":"owner"}`)
 	res.Body.Close()
 	if res.StatusCode != http.StatusNoContent {
-		t.Fatalf("transfer ownership: %d", res.StatusCode)
+		t.Fatalf("invite co-owner: %d", res.StatusCode)
+	}
+	if err := store.CreateSession(ctx, "lo-sess-dev", "lo-dev", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	reqAccept, err := http.NewRequest(http.MethodPost, srv.URL+"/api/user/invites/"+created.ID+"/accept", strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqAccept.AddCookie(&http.Cookie{Name: SessionCookie, Value: "lo-sess-dev"})
+	resAccept, err := srv.Client().Do(reqAccept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resAccept.Body.Close()
+	if resAccept.StatusCode != http.StatusNoContent {
+		t.Fatalf("accept co-owner invite: %d", resAccept.StatusCode)
 	}
 	res = do(http.MethodDelete, members+"/lo-owner", "")
 	res.Body.Close()
