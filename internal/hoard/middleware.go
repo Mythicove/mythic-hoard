@@ -19,15 +19,24 @@ func clientIP(r *http.Request) string {
 	return addr
 }
 
-// Admin 校验管理员 token（空 token 表示禁用鉴权）。
-func Admin(adminToken string) func(http.Handler) http.Handler {
+// AdminRole 校验管理员身份：静态管理令牌（bootstrap/救援通道）**或** role=admin 的登录态
+// （会话 cookie 或 mhp_ PAT，由全局 SessionAuth 注入 context）。两者都不满足 → 403。
+// 与 mirror 的 yggdrasil.AdminRole 同语义：后台界面用登录态，令牌只作救援，
+// 避免"管理 mod 必须手贴令牌"这第二套管理员模型。
+// 注意 fail closed：令牌为空时不再放行一切（旧 Admin 在 adminToken=="" 时对所有请求开放，
+// 生产忘配 HOARD_ADMIN_TOKEN 就等于把管理端点裸奔）。
+func AdminRole(adminToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if adminToken != "" && bearerToken(r) != adminToken {
-				http.Error(w, "forbidden", http.StatusForbidden)
+			if tok := bearerToken(r); adminToken != "" && tok == adminToken {
+				next.ServeHTTP(w, r)
 				return
 			}
-			next.ServeHTTP(w, r)
+			if u := UserFromContext(r.Context()); u.IsAdmin() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.Error(w, "forbidden", http.StatusForbidden)
 		})
 	}
 }

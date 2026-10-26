@@ -23,10 +23,29 @@ func newTestService(t *testing.T) *Service {
 	return NewService(NewMemoryStore(), files, "http://localhost:8080")
 }
 
+// testAdminToken 是测试用静态管理令牌。管理端点 fail closed：
+// 空令牌不再等于"开放"，故测试必须显式带令牌（或改用 role=admin 的会话）。
+const testAdminToken = "test-admin-token"
+
+func adminPost(t *testing.T, url, contentType string, body io.Reader) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "Bearer "+testAdminToken)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
 func TestUploadListDownloadMrpack(t *testing.T) {
 	svc := newTestService(t)
 	r := chi.NewRouter()
-	svc.Register(r, "")
+	svc.Register(r, testAdminToken)
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 
@@ -43,10 +62,7 @@ func TestUploadListDownloadMrpack(t *testing.T) {
 	_, _ = fw.Write([]byte("fake-jar-bytes"))
 	_ = mw.Close()
 
-	resp, err := http.Post(srv.URL+"/api/mods", mw.FormDataContentType(), body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := adminPost(t, srv.URL+"/api/mods", mw.FormDataContentType(), body)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("upload status %d", resp.StatusCode)
 	}
@@ -123,7 +139,7 @@ func TestUploadFileTooLarge(t *testing.T) {
 	svc := newTestService(t)
 	svc.SetMaxFileBytes(10)
 	r := chi.NewRouter()
-	svc.Register(r, "")
+	svc.Register(r, testAdminToken)
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 
@@ -136,10 +152,7 @@ func TestUploadFileTooLarge(t *testing.T) {
 	_, _ = fw.Write(bytes.Repeat([]byte("x"), 100))
 	_ = mw.Close()
 
-	resp, err := http.Post(srv.URL+"/api/mods", mw.FormDataContentType(), body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resp := adminPost(t, srv.URL+"/api/mods", mw.FormDataContentType(), body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversize upload status %d, want 413", resp.StatusCode)

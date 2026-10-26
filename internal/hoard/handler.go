@@ -47,7 +47,7 @@ func (s *Service) Register(r chi.Router, adminToken string) {
 	r.Get("/api/team/{id}/members", s.handleListTeamMembers)
 
 	r.Group(func(r chi.Router) {
-		r.Use(Admin(adminToken))
+		r.Use(AdminRole(adminToken))
 		r.Post("/api/mods", s.handleUpload)
 		r.Patch("/api/mods/{id}/status", s.handleSetStatus)
 		r.Delete("/api/mods/{id}", s.handleDelete)
