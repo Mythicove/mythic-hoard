@@ -91,6 +91,27 @@ func (s *Service) canManageTeam(r *http.Request, teamID string) bool {
 }
 
 // handleAddTeamMember 添加/变更成员（owner/admin）。
+// isLastOwner 报告 sub 是否为团队唯一 owner。末位 owner 离开或被降级会让团队失去
+// 管理者（无人能再加人、改状态、删项目），故这类操作必须先转移所有权。
+func (s *Service) isLastOwner(ctx context.Context, teamID, sub string) (bool, error) {
+	members, err := s.store.ListTeamMembers(ctx, teamID)
+	if err != nil {
+		return false, err
+	}
+	owners := 0
+	targetIsOwner := false
+	for _, m := range members {
+		if m.Role != "owner" {
+			continue
+		}
+		owners++
+		if m.UserSub == sub {
+			targetIsOwner = true
+		}
+	}
+	return targetIsOwner && owners <= 1, nil
+}
+
 func (s *Service) handleAddTeamMember(w http.ResponseWriter, r *http.Request) {
 	teamID := chi.URLParam(r, "id")
 	if !s.canManageTeam(r, teamID) {
@@ -107,6 +128,20 @@ func (s *Service) handleAddTeamMember(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Role != "owner" && req.Role != "member" {
 		req.Role = "member"
+	}
+	// 降级唯一 owner 等同把团队变成孤儿
+	if req.Role != "owner" {
+		if existing, err := s.store.GetTeamMember(r.Context(), teamID, req.Sub); err == nil && existing.Role == "owner" {
+			last, err := s.isLastOwner(r.Context(), teamID, req.Sub)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if last {
+				http.Error(w, "team needs at least one owner", http.StatusConflict)
+				return
+			}
+		}
 	}
 	if err := s.store.AddTeamMember(r.Context(), teamID, req.Sub, req.Role); err != nil {
 		if err == ErrNotFound {
@@ -126,6 +161,15 @@ func (s *Service) handleRemoveTeamMember(w http.ResponseWriter, r *http.Request)
 	u := UserFromContext(r.Context())
 	if sub != u.Sub && !s.canManageTeam(r, teamID) {
 		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	last, err := s.isLastOwner(r.Context(), teamID, sub)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if last {
+		http.Error(w, "last owner cannot leave; transfer ownership first", http.StatusConflict)
 		return
 	}
 	if err := s.store.RemoveTeamMember(r.Context(), teamID, sub); err != nil {

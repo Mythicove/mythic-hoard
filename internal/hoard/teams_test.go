@@ -236,3 +236,63 @@ func readAll(res *http.Response) (string, error) {
 	b, err := io.ReadAll(res.Body)
 	return string(b), err
 }
+
+// 末位 owner 保护：唯一所有者既不能退出也不能被降级，否则团队无人可管理。
+func TestTeamLastOwnerGuard(t *testing.T) {
+	ctx := context.Background()
+	_, store, srv := newAuthTestRouter(t)
+	defer srv.Close()
+	_ = store.UpsertUser(ctx, User{Sub: "lo-owner", Username: "LoOwner", Role: "user"})
+	_ = store.UpsertUser(ctx, User{Sub: "lo-dev", Username: "LoDev", Role: "user"})
+	if err := store.CreateSession(ctx, "lo-sess", "lo-owner", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	do := func(method, path, body string) *http.Response {
+		req, err := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.AddCookie(&http.Cookie{Name: SessionCookie, Value: "lo-sess"})
+		res, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	res := do(http.MethodPost, "/api/team", `{"name":"Solo"}`)
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&created)
+	res.Body.Close()
+	if res.StatusCode != http.StatusCreated || created.ID == "" {
+		t.Fatalf("create team: %d %+v", res.StatusCode, created)
+	}
+	members := "/api/team/" + created.ID + "/members"
+
+	// 唯一 owner 自己退出 → 409
+	res = do(http.MethodDelete, members+"/lo-owner", "")
+	res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("last owner leave: %d", res.StatusCode)
+	}
+	// 唯一 owner 被降级为 member → 409
+	res = do(http.MethodPost, members, `{"sub":"lo-owner","role":"member"}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusConflict {
+		t.Fatalf("last owner demote: %d", res.StatusCode)
+	}
+	// 移交所有权（新增第二个 owner）后，原 owner 可退出 → 204
+	res = do(http.MethodPost, members, `{"sub":"lo-dev","role":"owner"}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("transfer ownership: %d", res.StatusCode)
+	}
+	res = do(http.MethodDelete, members+"/lo-owner", "")
+	res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("leave after transfer: %d", res.StatusCode)
+	}
+}
