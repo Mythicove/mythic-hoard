@@ -73,6 +73,14 @@ type Sessions struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type TeamInvites struct {
+	TeamID    string
+	UserSub   string
+	Role      string
+	InvitedBy string
+	CreatedAt pgtype.Timestamptz
+}
+
 type TeamMembers struct {
 	TeamID    string
 	UserSub   string
