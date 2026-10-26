@@ -47,6 +47,7 @@ func (s *Service) Register(r chi.Router, adminToken string) {
 	})
 
 	r.Get("/api/mods", s.handleSearch)
+	r.Get("/api/mods/facets", s.handleFacets)
 	r.Get("/api/mods/{id}", s.handleGetProject)
 	r.Get("/api/mods/{id}/icon", s.handleIcon)
 	r.Get("/api/mods/{id}/download", s.handleDownload)
@@ -120,6 +121,32 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// handleFacets 返回可选过滤维度（loaders/game_versions/categories），供前端渲染过滤 chips。
+func (s *Service) handleFacets(w http.ResponseWriter, r *http.Request) {
+	loaders, err1 := s.store.ListLoaders(r.Context())
+	versions, err2 := s.store.ListGameVersions(r.Context())
+	categories, err3 := s.store.ListCategories(r.Context())
+	if err1 != nil || err2 != nil || err3 != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	empty := []string{}
+	if loaders == nil {
+		loaders = empty
+	}
+	if versions == nil {
+		versions = empty
+	}
+	if categories == nil {
+		categories = empty
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"loaders":       loaders,
+		"game_versions": versions,
+		"categories":    categories,
+	})
 }
 
 func (s *Service) handleGetProject(w http.ResponseWriter, r *http.Request) {
