@@ -138,9 +138,6 @@ SELECT m.team_id, COALESCE(tm.name, '')::text AS name, m.role, m.created_at
 FROM team_members m JOIN teams tm ON tm.id = m.team_id
 WHERE m.user_sub = $1 ORDER BY m.created_at ASC;
 
--- name: CountTeamMembers :one
-SELECT count(*) FROM team_members WHERE team_id = $1;
-
 -- name: SetProjectTeam :execrows
 UPDATE projects SET team_id = $2 WHERE id = $1;
 

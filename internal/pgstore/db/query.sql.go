@@ -87,17 +87,6 @@ func (q *Queries) CountSearchProjects(ctx context.Context, arg CountSearchProjec
 	return count, err
 }
 
-const countTeamMembers = `-- name: CountTeamMembers :one
-SELECT count(*) FROM team_members WHERE team_id = $1
-`
-
-func (q *Queries) CountTeamMembers(ctx context.Context, teamID string) (int64, error) {
-	row := q.db.QueryRow(ctx, countTeamMembers, teamID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createFile = `-- name: CreateFile :one
 INSERT INTO files (version_id, filename, size, sha1, sha512, storage_key, is_primary)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
