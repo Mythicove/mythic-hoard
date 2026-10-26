@@ -32,6 +32,7 @@ type Service struct {
 	maxFileBytes  int64
 	oidc          *oidcrp.RP
 	adminSubjects []string
+	nextOrigins   []string
 }
 
 // DefaultMaxFileBytes 是单个 mod 文件的默认大小上限（512 MiB）。

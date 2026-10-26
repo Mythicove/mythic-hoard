@@ -52,6 +52,9 @@ type Config struct {
 	OIDCClientSecret string `env:"HOARD_OIDC_CLIENT_SECRET"`
 	// 回调地址；留空则取 BaseURL + /auth/oidc/callback。
 	OIDCRedirectURL string `env:"HOARD_OIDC_REDIRECT_URL"`
+	// 服务端侧（discovery/JWKS/token）可达的 IdP 内网基址；留空则直连 Issuer。
+	// 用于 issuer 为浏览器面地址（如 localhost）而服务端在容器内的 split-horizon 部署。
+	OIDCInternalBaseURL string `env:"HOARD_OIDC_INTERNAL_BASE_URL"`
 	// 管理员 subject 白名单（逗号分隔的 Mirror 用户 ID）；命中者登录即映射 role=admin。
 	AdminSubjects []string `env:"HOARD_ADMIN_SUBJECTS" envSeparator:","`
 }

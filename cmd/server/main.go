@@ -66,10 +66,11 @@ func main() {
 			redirect = strings.TrimRight(cfg.BaseURL, "/") + "/auth/oidc/callback"
 		}
 		rp, err := oidcrp.New(context.Background(), oidcrp.Config{
-			Issuer:       cfg.OIDCIssuer,
-			ClientID:     cfg.OIDCClientID,
-			ClientSecret: cfg.OIDCClientSecret,
-			RedirectURL:  redirect,
+			Issuer:          cfg.OIDCIssuer,
+			ClientID:        cfg.OIDCClientID,
+			ClientSecret:    cfg.OIDCClientSecret,
+			RedirectURL:     redirect,
+			InternalBaseURL: cfg.OIDCInternalBaseURL,
 		})
 		if err != nil {
 			log.Fatalf("oidc rp: %v", err)
@@ -113,6 +114,8 @@ func main() {
 	}))
 	r.Use(hoard.SecurityHeaders())
 	r.Use(hoard.Metrics())
+	// SSO 回跳白名单复用 CORS 显式白名单（通配 "*" 不作为回跳目标）
+	svc.SetNextOrigins(cfg.CORSOrigins)
 	if cfg.RateLimitRPS > 0 {
 		r.Use(hoard.RateLimit(buildLimiter(context.Background(), cfg), "global", cfg.RateLimitBurst, time.Second))
 	}
