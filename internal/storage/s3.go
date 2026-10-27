@@ -33,7 +33,9 @@ type S3 struct {
 
 var _ storage.Storage = (*S3)(nil)
 
-// NewS3 构造 S3 存储。
+// NewS3 构造 S3 存储。baseURL 是完整公开前缀（含 /cdn 之类路径段，由调用方拼装），
+// 非空时 PresignGet 直接返回 baseURL + key 的公开 URL；为空才走 S3 presign。
+// 实现只拼接 object key，不得再追加自己的路径段（与 NewLocal 契约一致）。
 func NewS3(ctx context.Context, opts Options, baseURL string) (*S3, error) {
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(opts.Region),

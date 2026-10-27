@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Mythicove/shared/storage"
 )
@@ -19,7 +20,8 @@ type Local struct {
 
 var _ storage.Storage = (*Local)(nil)
 
-// NewLocal 构造本地存储；baseURL 用于 PresignGet 生成直出 URL。
+// NewLocal 构造本地存储；baseURL 是完整公开前缀（含 /cdn 之类路径段，由调用方拼装），
+// 用于 PresignGet 生成直出 URL。实现只拼接 object key，不得再追加自己的路径段。
 func NewLocal(dir, baseURL string) (*Local, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -54,5 +56,5 @@ func (s *Local) Delete(_ context.Context, key string) error {
 }
 
 func (s *Local) PresignGet(_ context.Context, key string) (*url.URL, error) {
-	return url.Parse(s.baseURL + "/cdn/" + key)
+	return url.Parse(strings.TrimRight(s.baseURL, "/") + "/" + key)
 }
