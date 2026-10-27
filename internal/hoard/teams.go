@@ -15,6 +15,10 @@ import (
 // PATPrefix 是个人访问令牌的明文前缀（用于区分 admin token 与会话）。
 const PATPrefix = "mhp_"
 
+// InviteTTL 是团队邀请的有效期。TTL 只在这里定义一次：过期时间由 Service 算好后传给
+// store（SQL 侧不再写默认值），过期的邀请在所有读取路径上视同不存在。
+const InviteTTL = 7 * 24 * time.Hour
+
 // scopesKey 是 PAT scopes 的 context 键。
 type scopesKey struct{}
 
@@ -212,7 +216,7 @@ func (s *Service) handleInviteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := UserFromContext(r.Context())
-	if err := s.store.UpsertTeamInvite(r.Context(), teamID, req.Sub, req.Role, u.Sub); err != nil {
+	if err := s.store.UpsertTeamInvite(r.Context(), teamID, req.Sub, req.Role, u.Sub, time.Now().UTC().Add(InviteTTL)); err != nil {
 		if err == ErrNotFound {
 			http.Error(w, "team or user not found", http.StatusNotFound)
 			return

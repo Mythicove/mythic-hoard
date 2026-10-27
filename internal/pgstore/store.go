@@ -474,9 +474,10 @@ func (s *Store) ListUserTeams(ctx context.Context, userSub string) ([]hoard.User
 	return out, nil
 }
 
-func (s *Store) UpsertTeamInvite(ctx context.Context, teamID, userSub, role, invitedBy string) error {
+func (s *Store) UpsertTeamInvite(ctx context.Context, teamID, userSub, role, invitedBy string, expiresAt time.Time) error {
 	_, err := s.q.UpsertTeamInvite(ctx, db.UpsertTeamInviteParams{
 		TeamID: teamID, UserSub: userSub, Role: role, InvitedBy: invitedBy,
+		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
 	})
 	if err != nil {
 		// 目标用户不存在（外键）→ 404，而不是把 DB 细节漏给调用方
@@ -507,6 +508,7 @@ func (s *Store) GetTeamInvite(ctx context.Context, teamID, userSub string) (*hoa
 	return &hoard.TeamInvite{
 		TeamID: row.TeamID, UserSub: row.UserSub, Username: row.Username,
 		Role: row.Role, InvitedBy: row.InvitedBy, CreatedAt: ts(row.CreatedAt),
+		ExpiresAt: ts(row.ExpiresAt),
 	}, nil
 }
 
@@ -520,6 +522,7 @@ func (s *Store) ListTeamInvites(ctx context.Context, teamID string) ([]hoard.Tea
 		out = append(out, hoard.TeamInvite{
 			TeamID: r.TeamID, UserSub: r.UserSub, Username: r.Username,
 			Role: r.Role, InvitedBy: r.InvitedBy, CreatedAt: ts(r.CreatedAt),
+			ExpiresAt: ts(r.ExpiresAt),
 		})
 	}
 	return out, nil
@@ -535,6 +538,7 @@ func (s *Store) ListInvitesForUser(ctx context.Context, userSub string) ([]hoard
 		out = append(out, hoard.UserInvite{
 			TeamID: r.TeamID, TeamName: r.TeamName,
 			Role: r.Role, InvitedBy: r.InvitedBy, CreatedAt: ts(r.CreatedAt),
+			ExpiresAt: ts(r.ExpiresAt),
 		})
 	}
 	return out, nil

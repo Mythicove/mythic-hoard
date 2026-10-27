@@ -277,3 +277,58 @@ func TestTeamsAndPATPG(t *testing.T) {
 		t.Fatalf("deleted pat: %v", err)
 	}
 }
+
+// 邀请过期在 SQL 侧同样生效（查询里的 expires_at > now() 过滤）。
+func TestTeamInviteExpiryPG(t *testing.T) {
+	dsn := testDSN(t)
+	ctx := context.Background()
+	st, err := New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	const ownerID = "exp-owner-pg"
+	const inviteeID = "exp-invitee-pg"
+	for _, sub := range []string{ownerID, inviteeID} {
+		if err := st.UpsertUser(ctx, hoard.User{Sub: sub, Username: sub, Role: "user"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	teamID, err := st.CreateTeam(ctx, "ExpiryPG", ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = st.pool.Exec(ctx, `DELETE FROM teams WHERE id = $1`, teamID) }()
+
+	if err := st.UpsertTeamInvite(ctx, teamID, inviteeID, "member", ownerID, time.Now().Add(hoard.InviteTTL)); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := st.GetTeamInvite(ctx, teamID, inviteeID)
+	if err != nil || inv.ExpiresAt == "" {
+		t.Fatalf("invite should be visible with an expiry: %+v err=%v", inv, err)
+	}
+
+	if _, err := st.pool.Exec(ctx,
+		`UPDATE team_invites SET expires_at = now() - interval '1 minute' WHERE team_id = $1 AND user_sub = $2`,
+		teamID, inviteeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetTeamInvite(ctx, teamID, inviteeID); err != hoard.ErrNotFound {
+		t.Fatalf("expired invite should read as not found: %v", err)
+	}
+	if got, err := st.ListTeamInvites(ctx, teamID); err != nil || len(got) != 0 {
+		t.Fatalf("expired invite still listed for team: %+v err=%v", got, err)
+	}
+	if got, err := st.ListInvitesForUser(ctx, inviteeID); err != nil || len(got) != 0 {
+		t.Fatalf("expired invite still listed for user: %+v err=%v", got, err)
+	}
+
+	// 重新邀请刷新有效期
+	if err := st.UpsertTeamInvite(ctx, teamID, inviteeID, "member", ownerID, time.Now().Add(hoard.InviteTTL)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetTeamInvite(ctx, teamID, inviteeID); err != nil {
+		t.Fatalf("re-invite should be visible again: %v", err)
+	}
+}

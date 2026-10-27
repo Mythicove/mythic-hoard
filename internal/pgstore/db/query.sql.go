@@ -594,9 +594,9 @@ func (q *Queries) GetSession(ctx context.Context, id string) (GetSessionRow, err
 }
 
 const getTeamInvite = `-- name: GetTeamInvite :one
-SELECT i.team_id, i.user_sub, COALESCE(u.username, '')::text AS username, i.role, i.invited_by, i.created_at
+SELECT i.team_id, i.user_sub, COALESCE(u.username, '')::text AS username, i.role, i.invited_by, i.created_at, i.expires_at
 FROM team_invites i LEFT JOIN users u ON u.sub = i.user_sub
-WHERE i.team_id = $1 AND i.user_sub = $2
+WHERE i.team_id = $1 AND i.user_sub = $2 AND i.expires_at > now()
 `
 
 type GetTeamInviteParams struct {
@@ -611,6 +611,7 @@ type GetTeamInviteRow struct {
 	Role      string
 	InvitedBy string
 	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
 }
 
 func (q *Queries) GetTeamInvite(ctx context.Context, arg GetTeamInviteParams) (GetTeamInviteRow, error) {
@@ -623,6 +624,7 @@ func (q *Queries) GetTeamInvite(ctx context.Context, arg GetTeamInviteParams) (G
 		&i.Role,
 		&i.InvitedBy,
 		&i.CreatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -815,9 +817,9 @@ func (q *Queries) ListGameVersions(ctx context.Context) ([]string, error) {
 }
 
 const listInvitesForUser = `-- name: ListInvitesForUser :many
-SELECT i.team_id, COALESCE(t.name, '')::text AS team_name, i.role, i.invited_by, i.created_at
+SELECT i.team_id, COALESCE(t.name, '')::text AS team_name, i.role, i.invited_by, i.created_at, i.expires_at
 FROM team_invites i JOIN teams t ON t.id = i.team_id
-WHERE i.user_sub = $1 ORDER BY i.created_at ASC
+WHERE i.user_sub = $1 AND i.expires_at > now() ORDER BY i.created_at ASC
 `
 
 type ListInvitesForUserRow struct {
@@ -826,6 +828,7 @@ type ListInvitesForUserRow struct {
 	Role      string
 	InvitedBy string
 	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
 }
 
 func (q *Queries) ListInvitesForUser(ctx context.Context, userSub string) ([]ListInvitesForUserRow, error) {
@@ -843,6 +846,7 @@ func (q *Queries) ListInvitesForUser(ctx context.Context, userSub string) ([]Lis
 			&i.Role,
 			&i.InvitedBy,
 			&i.CreatedAt,
+			&i.ExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -965,9 +969,9 @@ func (q *Queries) ListProjectDependencies(ctx context.Context, projectID string)
 }
 
 const listTeamInvites = `-- name: ListTeamInvites :many
-SELECT i.team_id, i.user_sub, COALESCE(u.username, '')::text AS username, i.role, i.invited_by, i.created_at
+SELECT i.team_id, i.user_sub, COALESCE(u.username, '')::text AS username, i.role, i.invited_by, i.created_at, i.expires_at
 FROM team_invites i LEFT JOIN users u ON u.sub = i.user_sub
-WHERE i.team_id = $1 ORDER BY i.created_at ASC
+WHERE i.team_id = $1 AND i.expires_at > now() ORDER BY i.created_at ASC
 `
 
 type ListTeamInvitesRow struct {
@@ -977,6 +981,7 @@ type ListTeamInvitesRow struct {
 	Role      string
 	InvitedBy string
 	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
 }
 
 func (q *Queries) ListTeamInvites(ctx context.Context, teamID string) ([]ListTeamInvitesRow, error) {
@@ -995,6 +1000,7 @@ func (q *Queries) ListTeamInvites(ctx context.Context, teamID string) ([]ListTea
 			&i.Role,
 			&i.InvitedBy,
 			&i.CreatedAt,
+			&i.ExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1386,8 +1392,9 @@ func (q *Queries) UpsertLoader(ctx context.Context, name string) error {
 }
 
 const upsertTeamInvite = `-- name: UpsertTeamInvite :execrows
-INSERT INTO team_invites (team_id, user_sub, role, invited_by) VALUES ($1, $2, $3, $4)
-ON CONFLICT (team_id, user_sub) DO UPDATE SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by
+INSERT INTO team_invites (team_id, user_sub, role, invited_by, expires_at) VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (team_id, user_sub) DO UPDATE
+SET role = EXCLUDED.role, invited_by = EXCLUDED.invited_by, expires_at = EXCLUDED.expires_at
 `
 
 type UpsertTeamInviteParams struct {
@@ -1395,6 +1402,7 @@ type UpsertTeamInviteParams struct {
 	UserSub   string
 	Role      string
 	InvitedBy string
+	ExpiresAt pgtype.Timestamptz
 }
 
 func (q *Queries) UpsertTeamInvite(ctx context.Context, arg UpsertTeamInviteParams) (int64, error) {
@@ -1403,6 +1411,7 @@ func (q *Queries) UpsertTeamInvite(ctx context.Context, arg UpsertTeamInvitePara
 		arg.UserSub,
 		arg.Role,
 		arg.InvitedBy,
+		arg.ExpiresAt,
 	)
 	if err != nil {
 		return 0, err

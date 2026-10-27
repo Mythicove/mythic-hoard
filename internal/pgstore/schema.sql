@@ -96,10 +96,12 @@ CREATE TABLE team_invites (
     user_sub   TEXT NOT NULL REFERENCES users(sub) ON DELETE CASCADE,
     role       TEXT NOT NULL DEFAULT 'member',
     invited_by TEXT NOT NULL DEFAULT '',
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '7 days'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (team_id, user_sub)
 );
 CREATE INDEX idx_team_invites_user ON team_invites (user_sub);
+CREATE INDEX idx_team_invites_expires ON team_invites (expires_at);
 
 CREATE TABLE personal_access_tokens (
     id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,

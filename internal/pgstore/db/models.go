@@ -78,6 +78,7 @@ type TeamInvites struct {
 	UserSub   string
 	Role      string
 	InvitedBy string
+	ExpiresAt pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
 }
 

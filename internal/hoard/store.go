@@ -57,6 +57,7 @@ type TeamInvite struct {
 	Role      string `json:"role"` // owner | member（接受后写入 team_members）
 	InvitedBy string `json:"invited_by"`
 	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // UserInvite 是被邀请人视角的待处理邀请（带团队名，供"我的邀请"列表）。
@@ -66,6 +67,7 @@ type UserInvite struct {
 	Role      string `json:"role"`
 	InvitedBy string `json:"invited_by"`
 	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // PAT 是个人访问令牌元数据（永不含明文）。
@@ -239,8 +241,9 @@ type Store interface {
 	GetTeamMember(ctx context.Context, teamID, userSub string) (*TeamMember, error)
 	ListTeamMembers(ctx context.Context, teamID string) ([]TeamMember, error)
 	ListUserTeams(ctx context.Context, userSub string) ([]UserTeam, error)
-	// 团队邀请：加入需被邀请人同意。行存在即 pending，接受/拒绝/撤销都删除该行。
-	UpsertTeamInvite(ctx context.Context, teamID, userSub, role, invitedBy string) error
+	// 团队邀请：加入需被邀请人同意。行存在即 pending，接受/拒绝/撤销都删除该行；
+	// 过期时间由调用方给出（TTL 只在 Service 定义一处），过期的邀请在所有读取路径上视同不存在。
+	UpsertTeamInvite(ctx context.Context, teamID, userSub, role, invitedBy string, expiresAt time.Time) error
 	DeleteTeamInvite(ctx context.Context, teamID, userSub string) error
 	GetTeamInvite(ctx context.Context, teamID, userSub string) (*TeamInvite, error)
 	ListTeamInvites(ctx context.Context, teamID string) ([]TeamInvite, error)

@@ -29,7 +29,14 @@ type memTeam struct {
 	name      string
 	createdAt time.Time
 	members   map[string]*TeamMember // user_sub -> member
-	invites   map[string]*TeamInvite // user_sub -> 待处理邀请
+	invites   map[string]*memInvite  // user_sub -> 待处理邀请
+}
+
+// memInvite 额外记住过期时刻：对外的 TeamInvite 只带 RFC3339 字符串，
+// 内存实现需要可比较的时间值来做"过期即视同不存在"的过滤。
+type memInvite struct {
+	inv     TeamInvite
+	expires time.Time
 }
 
 type memPAT struct {
@@ -402,14 +409,14 @@ func (s *MemoryStore) CreateTeam(_ context.Context, name, ownerSub string) (stri
 			TeamID: id, UserSub: ownerSub, Username: s.users[ownerSub].Username,
 			Role: "owner", CreatedAt: now.Format(time.RFC3339),
 		}},
-		invites: map[string]*TeamInvite{},
+		invites: map[string]*memInvite{},
 	}
 	return id, nil
 }
 
-// 团队邀请（内存实现）：行存在即 pending，接受/拒绝/撤销都删除。
+// 团队邀请（内存实现）：行存在即 pending，接受/拒绝/撤销都删除；过期的邀请视同不存在。
 
-func (s *MemoryStore) UpsertTeamInvite(_ context.Context, teamID, userSub, role, invitedBy string) error {
+func (s *MemoryStore) UpsertTeamInvite(_ context.Context, teamID, userSub, role, invitedBy string, expiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	team, ok := s.teams[teamID]
@@ -421,11 +428,16 @@ func (s *MemoryStore) UpsertTeamInvite(_ context.Context, teamID, userSub, role,
 		return ErrNotFound
 	}
 	if team.invites == nil {
-		team.invites = map[string]*TeamInvite{}
+		team.invites = map[string]*memInvite{}
 	}
-	team.invites[userSub] = &TeamInvite{
-		TeamID: teamID, UserSub: userSub, Username: u.Username,
-		Role: role, InvitedBy: invitedBy, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	now := time.Now().UTC()
+	team.invites[userSub] = &memInvite{
+		inv: TeamInvite{
+			TeamID: teamID, UserSub: userSub, Username: u.Username,
+			Role: role, InvitedBy: invitedBy,
+			CreatedAt: now.Format(time.RFC3339), ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+		},
+		expires: expiresAt.UTC(),
 	}
 	return nil
 }
@@ -452,10 +464,10 @@ func (s *MemoryStore) GetTeamInvite(_ context.Context, teamID, userSub string) (
 		return nil, ErrNotFound
 	}
 	inv, ok := team.invites[userSub]
-	if !ok {
+	if !ok || inv.expires.Before(time.Now().UTC()) {
 		return nil, ErrNotFound
 	}
-	cp := *inv
+	cp := inv.inv
 	return &cp, nil
 }
 
@@ -466,9 +478,13 @@ func (s *MemoryStore) ListTeamInvites(_ context.Context, teamID string) ([]TeamI
 	if !ok {
 		return nil, ErrNotFound
 	}
+	now := time.Now().UTC()
 	out := make([]TeamInvite, 0, len(team.invites))
 	for _, inv := range team.invites {
-		out = append(out, *inv)
+		if inv.expires.Before(now) {
+			continue
+		}
+		out = append(out, inv.inv)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
 	return out, nil
@@ -477,14 +493,18 @@ func (s *MemoryStore) ListTeamInvites(_ context.Context, teamID string) ([]TeamI
 func (s *MemoryStore) ListInvitesForUser(_ context.Context, userSub string) ([]UserInvite, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	now := time.Now().UTC()
 	var out []UserInvite
 	for id, team := range s.teams {
-		if inv, ok := team.invites[userSub]; ok {
-			out = append(out, UserInvite{
-				TeamID: id, TeamName: team.name,
-				Role: inv.Role, InvitedBy: inv.InvitedBy, CreatedAt: inv.CreatedAt,
-			})
+		inv, ok := team.invites[userSub]
+		if !ok || inv.expires.Before(now) {
+			continue
 		}
+		out = append(out, UserInvite{
+			TeamID: id, TeamName: team.name,
+			Role: inv.inv.Role, InvitedBy: inv.inv.InvitedBy,
+			CreatedAt: inv.inv.CreatedAt, ExpiresAt: inv.inv.ExpiresAt,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt < out[j].CreatedAt })
 	return out, nil

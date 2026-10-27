@@ -364,3 +364,52 @@ func TestTeamLastOwnerGuard(t *testing.T) {
 		t.Fatalf("leave after transfer: %d", res.StatusCode)
 	}
 }
+
+// 邀请过期：过期的邀请在所有读取路径上视同不存在；重新邀请会刷新有效期。
+func TestTeamInviteExpiry(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	_ = store.UpsertUser(ctx, User{Sub: "exp-own", Username: "ExpOwn", Role: "user"})
+	_ = store.UpsertUser(ctx, User{Sub: "exp-inv", Username: "ExpInv", Role: "user"})
+	teamID, err := store.CreateTeam(ctx, "Expiry", "exp-own")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.UpsertTeamInvite(ctx, teamID, "exp-inv", "member", "exp-own", time.Now().UTC().Add(InviteTTL)); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := store.GetTeamInvite(ctx, teamID, "exp-inv")
+	if err != nil || inv.ExpiresAt == "" {
+		t.Fatalf("get invite: %+v err=%v", inv, err)
+	}
+	if mine, err := store.ListInvitesForUser(ctx, "exp-inv"); err != nil || len(mine) != 1 || mine[0].ExpiresAt == "" {
+		t.Fatalf("my invites: %+v err=%v", mine, err)
+	}
+	if got, err := store.ListTeamInvites(ctx, teamID); err != nil || len(got) != 1 {
+		t.Fatalf("team invites: %+v err=%v", got, err)
+	}
+
+	// 把过期时间挪到过去（等价于时间流逝）
+	store.mu.Lock()
+	store.teams[teamID].invites["exp-inv"].expires = time.Now().UTC().Add(-time.Minute)
+	store.mu.Unlock()
+
+	if _, err := store.GetTeamInvite(ctx, teamID, "exp-inv"); err != ErrNotFound {
+		t.Fatalf("expired invite should read as not found: %v", err)
+	}
+	if got, _ := store.ListInvitesForUser(ctx, "exp-inv"); len(got) != 0 {
+		t.Fatalf("expired invite still listed for user: %+v", got)
+	}
+	if got, _ := store.ListTeamInvites(ctx, teamID); len(got) != 0 {
+		t.Fatalf("expired invite still listed for team: %+v", got)
+	}
+
+	// 重新邀请刷新有效期 → 又可用
+	if err := store.UpsertTeamInvite(ctx, teamID, "exp-inv", "member", "exp-own", time.Now().UTC().Add(InviteTTL)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetTeamInvite(ctx, teamID, "exp-inv"); err != nil {
+		t.Fatalf("re-invite should be visible again: %v", err)
+	}
+}
