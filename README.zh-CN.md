@@ -18,7 +18,7 @@ Minecraft mod 和整合包的分发后端，面向私群分发场景，与提供
 - 搜索双实现：pg_trgm（默认，含精确总数）和 Meilisearch（首次访问自动开通索引，filterableAttributes 加 maxTotalHits=1e6 使总数精确）；队列 inline 或 asynq。
 - 管理侧：管理员 token 的 legacy 上传、审核状态流转（listed、under_review、rejected、archived）、删除；HOARD_REQUIRE_REVIEW 可强制新上传进入审核。
 
-未做：上游镜像代理、画廊和截图。邀请有效期 7 天（InviteTTL，重新邀请会刷新；过期邀请在所有读取路径上视同不存在）。内容举报和皮肤审核队列在 Mirror（POST /reports、/api/admin/reports*、/api/admin/skins*），不在本仓库。完整差距见 docs/plans/status.md。
+未做：上游镜像代理、画廊和截图。邀请有效期 7 天（InviteTTL，重新邀请会刷新；过期邀请在所有读取路径上视同不存在）。内容举报和皮肤审核队列在 Mirror（POST /reports、/api/admin/reports*、/api/admin/skins*），不在本仓库。完整差距见[当前进度](https://docs.gov.skin/plans/status/)。
 
 ## 端点
 

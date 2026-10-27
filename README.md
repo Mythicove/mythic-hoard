@@ -18,7 +18,7 @@ The user system is wired up (v0.3.0):
 - Two search implementations: pg_trgm (default, exact totals) and Meilisearch (index provisioned on first access, with filterableAttributes and maxTotalHits=1e6 for exact totals). Queues run inline or on asynq.
 - Admin side: legacy uploads with an admin token, review state transitions (listed, under_review, rejected, archived) and deletion. HOARD_REQUIRE_REVIEW can force new uploads into review.
 
-Not done: upstream mirror proxying, gallery and screenshots. Invites expire after 7 days (InviteTTL, refreshed on re-invite; expired invites are treated as nonexistent on every read path). Content reports and the skin review queue live in Mirror (POST /reports, /api/admin/reports*, /api/admin/skins*), not here. The full gap list is in docs/plans/status.md.
+Not done: upstream mirror proxying, gallery and screenshots. Invites expire after 7 days (InviteTTL, refreshed on re-invite; expired invites are treated as nonexistent on every read path). Content reports and the skin review queue live in Mirror (POST /reports, /api/admin/reports*, /api/admin/skins*), not here. The full gap list is on the [status page](https://docs.gov.skin/plans/status/).
 
 ## Endpoints
 
