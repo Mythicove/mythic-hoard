@@ -1,50 +1,52 @@
 # Changelog
 
-本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
+**English** | [简体中文](./CHANGELOG.zh-CN.md)
+
+This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic versioning.
 
 ## [0.3.0] - 2026-10-23
 
-Phase 3（用户体系与开放上传）：普通用户无需管理员 token 即可发布 mod。
+Phase 3 (user system & open uploads): regular users can publish mods without an admin token.
 
-### 新增
+### Added
 
-- **OIDC RP SSO**（Mirror 为 IdP）：`internal/oidcrp`（go-oidc v3，discovery/JWKS 轮换/签名/iss/aud/exp/nonce 全校验）；`/auth/oidc/login|callback`、`/auth/logout`、`/auth/me`；state/nonce 短期 httpOnly cookie；会话 cookie `hoard_session`（httpOnly+Lax，7d，服务端可撤销）；用户投影表（migration 00002，重登不覆盖已提升 role）；`HOARD_ADMIN_SUBJECTS` 白名单幂等映射 admin
-- **团队与 PAT**（migration 00003）：`teams`/`team_members`（owner/member 两级）；个人访问令牌 `mhp_` 前缀、sha256 哈希存储、scopes（声明后强制，上传须含 UPLOAD）、过期、last_used、可撤销；`projects.team_id` 可空兼容存量
-- **用户级上传**：`POST /v2/project`（Modrinth 形 multipart，自动建团队归属）、`POST /v2/version`（团队成员校验）、`DELETE /v2/project/{id}`（owner/admin）；管理员 `/api/mods` 队列保留；`HOARD_REQUIRE_REVIEW` 审核开关
-- **mod 元数据解析**（migration 00004）：`internal/modmeta` 读 jar 内 fabric/quilt/(neo)forge 元数据 → 自动填充 title/description/loaders/game_versions/license/version/icon；表单优先、冲突写 `metadata_flags`；icon 提取入对象存储 + `/api/mods/{id}/icon` 直出
-- **版本依赖**（migration 00005）：required/optional/incompatible/embedded；`GET /v2/project/{id}/dependencies`；mrpack 合规增强（minecraft 依赖版本、env、overrides/）
-- CORS 白名单模式允许凭证（SSO cookie）
+- **OIDC RP SSO** (Mirror as IdP): `internal/oidcrp` (go-oidc v3; discovery / JWKS rotation / signature / iss / aud / exp / nonce all validated); `/auth/oidc/login|callback`, `/auth/logout`, `/auth/me`; state/nonce in short-lived httpOnly cookies; session cookie `hoard_session` (httpOnly+Lax, 7d, server-revocable); user projection table (migration 00002, re-login does not overwrite a promoted role); `HOARD_ADMIN_SUBJECTS` allowlist maps to admin idempotently
+- **Teams & PATs** (migration 00003): `teams`/`team_members` (owner/member two levels); personal access tokens with `mhp_` prefix, sha256 hash storage, scopes (enforced once declared; uploads require UPLOAD), expiry, last_used, revocable; `projects.team_id` nullable for existing rows
+- **User-level uploads**: `POST /v2/project` (Modrinth-shaped multipart, auto-creates team ownership), `POST /v2/version` (team membership check), `DELETE /v2/project/{id}` (owner/admin); the admin `/api/mods` queue is retained; `HOARD_REQUIRE_REVIEW` review switch
+- **Mod metadata parsing** (migration 00004): `internal/modmeta` reads fabric/quilt/(neo)forge metadata inside jars → auto-fills title/description/loaders/game_versions/license/version/icon; form values win, conflicts recorded in `metadata_flags`; extracted icons go to object storage + served at `/api/mods/{id}/icon`
+- **Version dependencies** (migration 00005): required/optional/incompatible/embedded; `GET /v2/project/{id}/dependencies`; mrpack compliance improvements (minecraft dependency version, env, overrides/)
+- CORS allowlist mode now permits credentials (SSO cookies)
 
-### 修复
+### Fixed
 
-- Meili 同键多值 facet 过滤被 AND 的语义 bug（应 OR）；`total_hits` 用 estimatedTotalHits（shared/search v0.1.2）
+- Meilisearch semantics bug where multi-value facet filters on the same key were ANDed (should be OR); `total_hits` now uses estimatedTotalHits (shared/search v0.1.2)
 
 ## [0.2.0] - 2026-10-23
 
-Phase 2（生产化与运维基线）。
+Phase 2 (production readiness & ops baseline).
 
-### 新增
+### Added
 
-- 限流新增 Redis 实现（`internal/redislimit`，Lua 原子固定窗口，多副本共享计数，fail-open 回退进程内）
-- `/metrics` Prometheus 端点（HTTP 时延/计数 + Go runtime）
-- 单文件大小上限 `HOARD_MAX_FILE_BYTES`（默认 512MiB，超限 413）
-- goose 迁移 advisory-lock 串行化（多副本并发启动安全）
+- Redis rate-limit implementation (`internal/redislimit`, atomic Lua fixed window, counts shared across replicas, fail-open fallback to in-process)
+- `/metrics` Prometheus endpoint (HTTP latency/counts + Go runtime)
+- Per-file size cap `HOARD_MAX_FILE_BYTES` (default 512MiB, 413 when exceeded)
+- goose migrations serialized via advisory lock (safe concurrent startup across replicas)
 
 ## [0.1.0] - 2026-10-23
 
-首个可用版本：私群 mod 分发 MVP。
+First usable version: private-group mod distribution MVP.
 
-### 新增
+### Added
 
-- Project → Version → File 三级模型（Postgres/sqlc 或内存存储），本地磁盘或 S3
-- Modrinth 兼容读子集：`/v2/search`（q + facets/loaders/game_versions/project_type/categories）、`/v2/project/{id}`、`/v2/project/{id}/version`、`/v2/version/{id}`、`/v2/tag/*`
-- `.mrpack` 生成：含 `dependencies`（loader 映射）与 `mods/` 路径前缀
-- 上传/审核：multipart 上传（SHA-1/SHA-512 哈希）、审核状态流转，`HOARD_ADMIN_TOKEN` 鉴权
-- 搜索双实现（pg_trgm / Meilisearch）、队列双实现（inline / asynq）、下载计数
-- 安全：可信代理感知 IP 解析（`shared/clientip`）、按 IP 固定窗口限流（TTL 清扫）、安全响应头、`ReadHeaderTimeout`/`IdleTimeout`、CORS 白名单（`HOARD_CORS_ORIGINS`，修复漏 PATCH）
-- 工程化：sqlc + CI 漂移检查、契约漂移门、Postgres 集成测试、gofmt 门、govulncheck
+- Project → Version → File three-level model (Postgres/sqlc or in-memory store), local disk or S3
+- Modrinth-compatible read subset: `/v2/search` (q + facets/loaders/game_versions/project_type/categories), `/v2/project/{id}`, `/v2/project/{id}/version`, `/v2/version/{id}`, `/v2/tag/*`
+- `.mrpack` generation: with `dependencies` (loader mapping) and `mods/` path prefix
+- Upload/review: multipart uploads (SHA-1/SHA-512 hashes), review state transitions, `HOARD_ADMIN_TOKEN` auth
+- Dual search implementations (pg_trgm / Meilisearch), dual queue implementations (inline / asynq), download counts
+- Security: trusted-proxy-aware IP resolution (`shared/clientip`), per-IP fixed-window rate limiting (TTL sweep), security response headers, `ReadHeaderTimeout`/`IdleTimeout`, CORS allowlist (`HOARD_CORS_ORIGINS`, fixed missing PATCH)
+- Engineering: sqlc + CI drift check, contract drift gate, Postgres integration tests, gofmt gate, govulncheck
 
-### 已知限制
+### Known limitations
 
-- **无用户体系**：上传/审核仅靠管理员 token；用户/团队/API Token 在 Phase 3（经 Mirror OIDC）
-- 无版本依赖关系、不解析 mod 元数据、无上游镜像代理（Phase 3）
+- **No user system**: uploads/review rely on the admin token only; users/teams/API tokens arrive in Phase 3 (via Mirror OIDC)
+- No version dependencies, no mod metadata parsing, no upstream mirror proxy (Phase 3)
