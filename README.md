@@ -122,6 +122,8 @@ Order for adding a persisted entity: migrations/0000N_*.sql (goose, 5-digit sequ
 
 ## License
 
-[Elastic License 2.0 (ELv2)](./LICENSE)
+[Elastic License 2.0 (ELv2)](./LICENSE) — source-available, not OSI open source. The licensing philosophy and intended-use FAQ live on the docs site: [English](https://docs.gov.skin/en/community/licensing/) · [中文](https://docs.gov.skin/community/licensing/).
+
+Self-hosting, modifying and redistributing are all free, including for a monetized community: running your mod site with donations, sponsorships or bundled perks, or shipping it with server panels and modpacks, is fine. ELv2 only restricts offering this software itself to third parties as a hosted/managed service, circumventing license keys, and removing notices.
 
 The repository was released under AGPL-3.0 (v0.1.0 to v0.3.0) and moved to ELv2 on 2026-10-26. See [LICENSE.history](./LICENSE.history) for the history and what it means.
