@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -129,7 +130,7 @@ func (m *Meili) Query(_ context.Context, index, q string, facets map[string][]st
 		}
 		conds := make([]string, 0, len(vals))
 		for _, v := range vals {
-			conds = append(conds, k+" = "+v)
+			conds = append(conds, k+" = "+strconv.Quote(v))
 		}
 		filters = append(filters, "("+strings.Join(conds, " OR ")+")")
 	}

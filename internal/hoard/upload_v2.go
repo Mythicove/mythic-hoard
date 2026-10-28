@@ -79,6 +79,7 @@ func (s *Service) handleUserCreateProject(w http.ResponseWriter, r *http.Request
 		http.Error(w, "token lacks UPLOAD scope", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxFileBytes+(1<<20))
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		http.Error(w, "invalid multipart body", http.StatusBadRequest)
 		return
@@ -127,6 +128,7 @@ func (s *Service) handleUserAddVersion(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "token lacks UPLOAD scope", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxFileBytes+(1<<20))
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		http.Error(w, "invalid multipart body", http.StatusBadRequest)
 		return
@@ -169,6 +171,10 @@ func (s *Service) handleUserAddVersion(w http.ResponseWriter, r *http.Request) {
 // handleUserDeleteProject 删除项目（团队 owner 或站点 admin）。
 func (s *Service) handleUserDeleteProject(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
+	if !requireUploadScope(r) {
+		http.Error(w, "token lacks UPLOAD scope", http.StatusForbidden)
+		return
+	}
 	if err := s.UserDeleteProject(r.Context(), u, chi.URLParam(r, "id")); err != nil {
 		writeUploadError(w, err)
 		return

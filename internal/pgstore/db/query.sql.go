@@ -399,7 +399,7 @@ func (q *Queries) DeleteTeamInvite(ctx context.Context, arg DeleteTeamInvitePara
 }
 
 const getPATByHash = `-- name: GetPATByHash :one
-SELECT p.id, p.user_sub, p.name, p.scopes, p.expires_at, u.username, u.role
+SELECT p.id, p.user_sub, p.name, p.scopes, p.expires_at, u.username, u.email, u.avatar_url, u.role
 FROM personal_access_tokens p JOIN users u ON u.sub = p.user_sub
 WHERE p.token_hash = $1 AND (p.expires_at IS NULL OR p.expires_at > now())
 `
@@ -411,6 +411,8 @@ type GetPATByHashRow struct {
 	Scopes    []string
 	ExpiresAt pgtype.Timestamptz
 	Username  string
+	Email     string
+	AvatarUrl string
 	Role      string
 }
 
@@ -424,6 +426,8 @@ func (q *Queries) GetPATByHash(ctx context.Context, tokenHash string) (GetPATByH
 		&i.Scopes,
 		&i.ExpiresAt,
 		&i.Username,
+		&i.Email,
+		&i.AvatarUrl,
 		&i.Role,
 	)
 	return i, err
@@ -497,6 +501,7 @@ func (q *Queries) GetProjectTeam(ctx context.Context, id string) (string, error)
 const getProjectsByIDs = `-- name: GetProjectsByIDs :many
 SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
 FROM projects WHERE id = ANY($1::text[])
+ORDER BY array_position($1::text[], id)
 `
 
 type GetProjectsByIDsRow struct {
@@ -1341,6 +1346,17 @@ func (q *Queries) SetUserRole(ctx context.Context, arg SetUserRoleParams) (int64
 	return result.RowsAffected(), nil
 }
 
+const teamExists = `-- name: TeamExists :one
+SELECT EXISTS(SELECT 1 FROM teams WHERE id = $1)
+`
+
+func (q *Queries) TeamExists(ctx context.Context, id string) (bool, error) {
+	row := q.db.QueryRow(ctx, teamExists, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const touchPAT = `-- name: TouchPAT :exec
 UPDATE personal_access_tokens SET last_used = now() WHERE id = $1
 `
@@ -1350,7 +1366,7 @@ func (q *Queries) TouchPAT(ctx context.Context, id string) error {
 	return err
 }
 
-const updateProjectStatus = `-- name: UpdateProjectStatus :exec
+const updateProjectStatus = `-- name: UpdateProjectStatus :execrows
 UPDATE projects SET status = $2 WHERE id = $1
 `
 
@@ -1359,9 +1375,12 @@ type UpdateProjectStatusParams struct {
 	Status string
 }
 
-func (q *Queries) UpdateProjectStatus(ctx context.Context, arg UpdateProjectStatusParams) error {
-	_, err := q.db.Exec(ctx, updateProjectStatus, arg.ID, arg.Status)
-	return err
+func (q *Queries) UpdateProjectStatus(ctx context.Context, arg UpdateProjectStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateProjectStatus, arg.ID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertCategory = `-- name: UpsertCategory :exec

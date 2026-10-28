@@ -119,7 +119,14 @@ func (s *Store) Search(ctx context.Context, q string, f hoard.Filter, limit, off
 }
 
 func (s *Store) UpdateProjectStatus(ctx context.Context, id, status string) error {
-	return s.q.UpdateProjectStatus(ctx, db.UpdateProjectStatusParams{ID: id, Status: status})
+	n, err := s.q.UpdateProjectStatus(ctx, db.UpdateProjectStatusParams{ID: id, Status: status})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return hoard.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) DeleteProject(ctx context.Context, id string) error {
@@ -448,6 +455,13 @@ func (s *Store) GetTeamMember(ctx context.Context, teamID, userSub string) (*hoa
 }
 
 func (s *Store) ListTeamMembers(ctx context.Context, teamID string) ([]hoard.TeamMember, error) {
+	exists, err := s.q.TeamExists(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, hoard.ErrNotFound
+	}
 	rows, err := s.q.ListTeamMembers(ctx, teamID)
 	if err != nil {
 		return nil, err
@@ -612,7 +626,10 @@ func (s *Store) ValidatePAT(ctx context.Context, tokenHash string) (*hoard.PATSe
 	}
 	_ = s.q.TouchPAT(ctx, row.ID)
 	return &hoard.PATSession{
-		User:   hoard.User{Sub: row.UserSub, Username: row.Username, Role: row.Role},
+		User: hoard.User{
+			Sub: row.UserSub, Username: row.Username,
+			Email: row.Email, AvatarURL: row.AvatarUrl, Role: row.Role,
+		},
 		PATID:  row.ID,
 		Scopes: row.Scopes,
 	}, nil

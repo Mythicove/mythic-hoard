@@ -3,6 +3,8 @@ package hoard
 import (
 	"archive/zip"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -10,6 +12,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+func currentUser(r *http.Request) *User {
+	return UserFromContext(r.Context())
+}
 
 // Register 注册路由；adminToken 用于保护写端点（空则开放）。
 // 注意：会话注入中间件（SessionAuth）须在调用方注册路由**之前**挂载（chi 约束），见 cmd/server/main.go。
@@ -59,6 +65,7 @@ func (s *Service) Register(r chi.Router, adminToken string) {
 	r.Get("/api/mods/{id}/icon", s.handleIcon)
 	r.Get("/api/mods/{id}/download", s.handleDownload)
 	r.Get("/api/mods/{id}/version/{vid}/file/{fid}", s.handleFile)
+	r.Get("/cdn/{key}", s.handleCDN)
 
 	r.Get("/v2/search", s.handleSearch)
 	r.Get("/v2/project/{id}", s.handleGetProject)
@@ -158,7 +165,7 @@ func (s *Service) handleFacets(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleGetProject(w http.ResponseWriter, r *http.Request) {
 	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
+	if err != nil || !s.CanView(r.Context(), p, currentUser(r)) {
 		http.NotFound(w, r)
 		return
 	}
@@ -168,7 +175,7 @@ func (s *Service) handleGetProject(w http.ResponseWriter, r *http.Request) {
 // handleIcon 直出项目 icon（jar 内解析所得；无 icon 时 404）。
 func (s *Service) handleIcon(w http.ResponseWriter, r *http.Request) {
 	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
-	if err != nil || p.IconKey == "" {
+	if err != nil || !s.CanView(r.Context(), p, currentUser(r)) || p.IconKey == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -184,34 +191,56 @@ func (s *Service) handleIcon(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleDownload(w http.ResponseWriter, r *http.Request) {
-	rc, file, err := s.Download(r.Context(), chi.URLParam(r, "id"))
+	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
+	if err != nil || !s.CanView(r.Context(), p, currentUser(r)) {
+		http.NotFound(w, r)
+		return
+	}
+	rc, file, err := s.Download(r.Context(), p.ID)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	defer rc.Close()
-	w.Header().Set("Content-Disposition", "attachment; filename="+file.Filename)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", file.Filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	_, _ = io.Copy(w, rc)
 }
 
 func (s *Service) handleFile(w http.ResponseWriter, r *http.Request) {
-	rc, file, err := s.FileStream(r.Context(), chi.URLParam(r, "id"), chi.URLParam(r, "vid"), chi.URLParam(r, "fid"))
+	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
+	if err != nil || !s.CanView(r.Context(), p, currentUser(r)) {
+		http.NotFound(w, r)
+		return
+	}
+	rc, file, err := s.FileStream(r.Context(), p.ID, chi.URLParam(r, "vid"), chi.URLParam(r, "fid"))
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	defer rc.Close()
-	w.Header().Set("Content-Disposition", "attachment; filename="+file.Filename)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", file.Filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	_, _ = io.Copy(w, rc)
 }
 
+func (s *Service) handleCDN(w http.ResponseWriter, r *http.Request) {
+	rc, err := s.files.Get(r.Context(), chi.URLParam(r, "key"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer rc.Close()
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = io.Copy(w, rc)
+}
+
 func (s *Service) handleProjectVersions(w http.ResponseWriter, r *http.Request) {
 	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
+	if err != nil || !s.CanView(r.Context(), p, currentUser(r)) {
 		http.NotFound(w, r)
 		return
 	}
@@ -229,6 +258,11 @@ func (s *Service) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	p, err := s.GetProject(r.Context(), v.ProjectID)
+	if err != nil || !s.CanView(r.Context(), p, currentUser(r)) {
+		http.NotFound(w, r)
+		return
+	}
 	writeJSON(w, http.StatusOK, v)
 }
 
@@ -241,6 +275,10 @@ func (s *Service) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.SetStatus(r.Context(), chi.URLParam(r, "id"), req.Status); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -262,7 +300,7 @@ func (s *Service) handleMrpack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := s.GetProject(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
+	if err != nil || !s.CanView(r.Context(), p, currentUser(r)) {
 		http.NotFound(w, r)
 		return
 	}

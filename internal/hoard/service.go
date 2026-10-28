@@ -260,12 +260,16 @@ type SearchResult struct {
 // Search 列表/搜索项目（仅返回公开 listed 项目）。
 func (s *Service) Search(ctx context.Context, q string, f Filter, limit, offset int) (SearchResult, error) {
 	if s.search != nil {
-		ids, total, err := s.search.Query(ctx, "projects", q, map[string][]string{
+		facets := map[string][]string{
 			"loaders":       f.Loaders,
 			"game_versions": f.GameVersions,
 			"categories":    f.Categories,
 			"project_type":  f.ProjectTypes,
-		}, limit, offset)
+		}
+		if f.Status != "" {
+			facets["status"] = []string{f.Status}
+		}
+		ids, total, err := s.search.Query(ctx, "projects", q, facets, limit, offset)
 		if err != nil {
 			return SearchResult{}, err
 		}
@@ -413,11 +417,53 @@ func (s *Service) SetStatus(ctx context.Context, id, status string) error {
 	default:
 		return ErrInvalid
 	}
-	return s.store.UpdateProjectStatus(ctx, id, status)
+	if err := s.store.UpdateProjectStatus(ctx, id, status); err != nil {
+		return err
+	}
+	if p, err := s.store.GetProject(ctx, id); err == nil {
+		s.indexProject(ctx, p)
+	}
+	return nil
+}
+
+func (s *Service) CanView(ctx context.Context, p *Project, u *User) bool {
+	if p.Status == "listed" {
+		return true
+	}
+	if u == nil {
+		return false
+	}
+	if u.Role == "admin" {
+		return true
+	}
+	members, err := s.store.ListTeamMembers(ctx, p.TeamID)
+	if err != nil {
+		return false
+	}
+	for _, m := range members {
+		if m.UserSub == u.Sub {
+			return true
+		}
+	}
+	return false
 }
 
 // DeleteProject 删除项目及其文件。
 func (s *Service) DeleteProject(ctx context.Context, id string) error {
+	p, _ := s.store.GetProject(ctx, id)
+	versions, _ := s.store.ListVersions(ctx, id)
+	for _, v := range versions {
+		files, err := s.store.ListFiles(ctx, v.ID)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			_ = s.files.Delete(ctx, f.StorageKey)
+		}
+	}
+	if p != nil && p.IconKey != "" {
+		_ = s.files.Delete(ctx, p.IconKey)
+	}
 	if err := s.store.DeleteProject(ctx, id); err != nil {
 		return err
 	}
@@ -470,6 +516,7 @@ func (s *Service) handleIndexTask(ctx context.Context, t queue.Task) error {
 			"loaders":       p.Loaders,
 			"game_versions": p.GameVersions,
 			"categories":    p.Categories,
+			"status":        {p.Status},
 		},
 	}})
 }
@@ -596,7 +643,7 @@ func (s *Service) UserDeleteProject(ctx context.Context, u *User, projectID stri
 	if !allowed {
 		return ErrForbidden
 	}
-	return s.store.DeleteProject(ctx, projectID)
+	return s.DeleteProject(ctx, projectID)
 }
 
 // checkProjectMember 校验用户是项目团队成员；无团队的存量项目仅站点 admin 可写。

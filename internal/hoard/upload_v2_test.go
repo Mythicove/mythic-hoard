@@ -117,7 +117,7 @@ func TestUserUploadOwnershipFlow(t *testing.T) {
 		t.Fatalf("stranger delete: %d", res.StatusCode)
 	}
 
-	// PAT：伪造 → 401；无 scopes → 可上传；READ-only → 403
+	// PAT：伪造 → 401；UPLOAD scope → 可上传；READ-only / 无 scopes → 403
 	res = doBearer(http.MethodGet, "/auth/me", "", "", "mhp_unknown")
 	res.Body.Close()
 	if res.StatusCode != http.StatusUnauthorized {
@@ -125,8 +125,10 @@ func TestUserUploadOwnershipFlow(t *testing.T) {
 	}
 	tokOK, hashOK := generatePAT()
 	tokRO, hashRO := generatePAT()
-	_, _ = store.CreatePAT(ctx, "up-owner", "ci-ok", hashOK, nil, nil)
+	tokNil, hashNil := generatePAT()
+	_, _ = store.CreatePAT(ctx, "up-owner", "ci-ok", hashOK, []string{"UPLOAD"}, nil)
 	_, _ = store.CreatePAT(ctx, "up-owner", "ci-readonly", hashRO, []string{"READ"}, nil)
+	_, _ = store.CreatePAT(ctx, "up-owner", "ci-noscope", hashNil, nil, nil)
 
 	pd := `{"title":"PAT Mod","project_type":"mod","version_number":"0.1.0"}`
 	ct, body = multipartUpload(t, pd, "pat.jar", []byte("pat-bytes"))
@@ -140,6 +142,12 @@ func TestUserUploadOwnershipFlow(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("readonly pat upload: %d", res.StatusCode)
+	}
+	ct, body = multipartUpload(t, pd, "pat3.jar", []byte("z"))
+	res = doBearer(http.MethodPost, "/v2/project", ct, body.String(), tokNil)
+	res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("scopeless pat upload: %d", res.StatusCode)
 	}
 
 	// owner 删除自己项目 → 204

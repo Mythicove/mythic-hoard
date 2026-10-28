@@ -4,7 +4,6 @@ package redislimit
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/Mythicove/shared/ratelimit"
@@ -53,16 +52,4 @@ func (l *Limiter) Allow(ctx context.Context, key string, limit int, window time.
 		return true, nil
 	}
 	return n <= int64(limit), nil
-}
-
-// Count 返回 key 当前窗口计数（测试/诊断用）。
-func (l *Limiter) Count(ctx context.Context, key string) (int, error) {
-	v, err := l.client.Get(ctx, "rl:"+l.ns+":"+key).Result()
-	if err == redis.Nil {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(v)
 }

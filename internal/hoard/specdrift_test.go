@@ -14,12 +14,14 @@ import (
 
 func specFile(t *testing.T) string {
 	t.Helper()
-	candidates := []string{}
 	if env := os.Getenv("MYTHICOVE_API_SPECS"); env != "" {
-		candidates = append(candidates, env)
+		p := filepath.Join(env, "hoard.openapi.yaml")
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("MYTHICOVE_API_SPECS=%s set but spec file missing: %v", env, err)
+		}
+		return p
 	}
-	candidates = append(candidates, "../../../api/specs", "../../../../api/specs")
-	for _, dir := range candidates {
+	for _, dir := range []string{"../../../api/specs", "../../../../api/specs"} {
 		p := filepath.Join(dir, "hoard.openapi.yaml")
 		if _, err := os.Stat(p); err == nil {
 			return p
@@ -89,8 +91,9 @@ func routerOps(t *testing.T) map[string]bool {
 	}
 	svc := NewService(NewMemoryStore(), files, "http://localhost:8080")
 	r := chi.NewRouter()
-	// 与 cmd/server/main.go 一致：healthz 在 Register 之外单独注册。
+	// 与 cmd/server/main.go 一致：healthz/metrics 在 Register 之外单独注册。
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	r.Get("/metrics", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	svc.Register(r, "")
 
 	ops := map[string]bool{}
@@ -112,5 +115,33 @@ func TestSpecMatchesRoutes(t *testing.T) {
 	}
 	if len(missing) > 0 {
 		t.Errorf("spec documents operations not present in router:\n  %s", strings.Join(missing, "\n  "))
+	}
+}
+
+func TestRoutesMatchSpec(t *testing.T) {
+	spec := parseSpecPaths(t, specFile(t))
+	routes := routerOps(t)
+	allowOps := map[string]bool{"GET /metrics": true}
+	allowPrefixes := []string{"/cdn/"}
+	var extra []string
+	for op := range routes {
+		if allowOps[op] {
+			continue
+		}
+		_, path, _ := strings.Cut(op, " ")
+		allowed := false
+		for _, p := range allowPrefixes {
+			if strings.HasPrefix(path, p) {
+				allowed = true
+				break
+			}
+		}
+		if allowed || spec[op] {
+			continue
+		}
+		extra = append(extra, op)
+	}
+	if len(extra) > 0 {
+		t.Errorf("router registers operations not documented in spec:\n  %s", strings.Join(extra, "\n  "))
 	}
 }

@@ -154,7 +154,9 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// 中转 cookie 用完即清
 	next := "/"
 	if c, err := r.Cookie(nextCookie); err == nil && c.Value != "" {
-		next = c.Value
+		if v := s.safeNext(c.Value); v != "" {
+			next = v
+		}
 	}
 	for _, name := range []string{stateCookie, nonceCookie, nextCookie} {
 		http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/auth/oidc", MaxAge: -1})

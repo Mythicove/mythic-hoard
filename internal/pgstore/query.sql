@@ -12,7 +12,8 @@ FROM projects WHERE id = $1 OR slug = $1 LIMIT 1;
 
 -- name: GetProjectsByIDs :many
 SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
-FROM projects WHERE id = ANY(@ids::text[]);
+FROM projects WHERE id = ANY(@ids::text[])
+ORDER BY array_position(@ids::text[], id);
 
 -- name: SearchProjects :many
 SELECT id, slug, title, description, body, project_type, client_side, server_side, status, downloads, follows, loaders, game_versions, categories, published_at, team_id, license, icon_key, meta_flags
@@ -35,7 +36,7 @@ WHERE ($1::text = '' OR title ILIKE '%' || $1::text || '%' OR description ILIKE 
   AND (cardinality($5::text[]) = 0 OR categories && $5::text[])
   AND ($6::text = '' OR status = $6::text);
 
--- name: UpdateProjectStatus :exec
+-- name: UpdateProjectStatus :execrows
 UPDATE projects SET status = $2 WHERE id = $1;
 
 -- name: DeleteProject :execrows
@@ -133,6 +134,9 @@ SELECT m.team_id, m.user_sub, COALESCE(u.username, '')::text AS username, m.role
 FROM team_members m LEFT JOIN users u ON u.sub = m.user_sub
 WHERE m.team_id = $1 ORDER BY m.created_at ASC;
 
+-- name: TeamExists :one
+SELECT EXISTS(SELECT 1 FROM teams WHERE id = $1);
+
 -- name: ListUserTeams :many
 SELECT m.team_id, COALESCE(tm.name, '')::text AS name, m.role, m.created_at
 FROM team_members m JOIN teams tm ON tm.id = m.team_id
@@ -176,7 +180,7 @@ SELECT id, user_sub, name, scopes, expires_at, last_used, created_at
 FROM personal_access_tokens WHERE user_sub = $1 ORDER BY created_at DESC;
 
 -- name: GetPATByHash :one
-SELECT p.id, p.user_sub, p.name, p.scopes, p.expires_at, u.username, u.role
+SELECT p.id, p.user_sub, p.name, p.scopes, p.expires_at, u.username, u.email, u.avatar_url, u.role
 FROM personal_access_tokens p JOIN users u ON u.sub = p.user_sub
 WHERE p.token_hash = $1 AND (p.expires_at IS NULL OR p.expires_at > now());
 

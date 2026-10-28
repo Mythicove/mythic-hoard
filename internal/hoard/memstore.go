@@ -267,6 +267,12 @@ func (s *MemoryStore) ListVersions(_ context.Context, projectID string) ([]Versi
 			out = append(out, *v)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].DatePublished != out[j].DatePublished {
+			return out[i].DatePublished > out[j].DatePublished
+		}
+		return out[i].ID > out[j].ID
+	})
 	return out, nil
 }
 
@@ -666,7 +672,11 @@ func (s *MemoryStore) ValidatePAT(_ context.Context, tokenHash string) (*PATSess
 			return nil, ErrNotFound
 		}
 		p.lastUsed = time.Now().UTC()
-		return &PATSession{User: *u, PATID: p.id, Scopes: p.scopes}, nil
+		scopes := p.scopes
+		if scopes == nil {
+			scopes = []string{}
+		}
+		return &PATSession{User: *u, PATID: p.id, Scopes: scopes}, nil
 	}
 	return nil, ErrNotFound
 }

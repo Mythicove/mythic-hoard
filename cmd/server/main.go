@@ -101,23 +101,28 @@ func main() {
 			origins = append(origins, o)
 		}
 	}
+	// 通配回退（仅开发）不允许凭证；显式白名单时允许（SSO 会话 cookie 需要）。
+	allowCredentials := len(origins) > 0
+	// SSO 回跳白名单复用 CORS 显式白名单（通配 "*" 不作为回跳目标）
+	svc.SetNextOrigins(origins)
 	if len(origins) == 0 {
 		origins = []string{"*"}
 	}
-	// 通配回退（仅开发）不允许凭证；显式白名单时允许（SSO 会话 cookie 需要）。
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: len(cfg.CORSOrigins) > 0,
+		AllowCredentials: allowCredentials,
 		MaxAge:           300,
 	}))
 	r.Use(hoard.SecurityHeaders())
 	r.Use(hoard.Metrics())
-	// SSO 回跳白名单复用 CORS 显式白名单（通配 "*" 不作为回跳目标）
-	svc.SetNextOrigins(cfg.CORSOrigins)
 	if cfg.RateLimitRPS > 0 {
-		r.Use(hoard.RateLimit(buildLimiter(context.Background(), cfg), "global", cfg.RateLimitBurst, time.Second))
+		window := time.Duration(float64(time.Second) * float64(cfg.RateLimitBurst) / float64(cfg.RateLimitRPS))
+		if window < time.Second {
+			window = time.Second
+		}
+		r.Use(hoard.RateLimit(buildLimiter(context.Background(), cfg), "global", cfg.RateLimitBurst, window))
 	}
 	// 会话注入须在任何路由注册前（chi 约束）
 	r.Use(svc.SessionAuth())
