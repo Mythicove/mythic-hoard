@@ -28,9 +28,9 @@ const (
 )
 
 // SetOIDC 注入 OIDC RP 与管理员 subject 白名单（白名单内用户登录即映射为 admin，幂等）。
+// 可能在服务已对外提供之后调用（后台 discovery 重试成功），故整体原子替换。
 func (s *Service) SetOIDC(rp *oidcrp.RP, adminSubjects []string) {
-	s.oidc = rp
-	s.adminSubjects = adminSubjects
+	s.oidc.Store(&oidcBundle{rp: rp, adminSubjects: adminSubjects})
 }
 
 // userKey 是会话用户的 context 键。
@@ -108,7 +108,8 @@ func (s *Service) safeNext(next string) string {
 // HandleOIDCLogin 生成 state/nonce（短期 httpOnly cookie 保管）并跳转授权端点。
 // next 参数（站内相对路径）记录登录后的回跳目标，供静默 SSO 回到发起页。
 func (s *Service) HandleOIDCLogin(w http.ResponseWriter, r *http.Request) {
-	if s.oidc == nil {
+	b := s.oidc.Load()
+	if b == nil {
 		http.Error(w, "oidc not configured", http.StatusNotFound)
 		return
 	}
@@ -126,12 +127,13 @@ func (s *Service) HandleOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	for _, c := range cookies {
 		http.SetCookie(w, c)
 	}
-	http.Redirect(w, r, s.oidc.AuthCodeURL(state, nonce), http.StatusFound)
+	http.Redirect(w, r, b.rp.AuthCodeURL(state, nonce), http.StatusFound)
 }
 
 // HandleOIDCCallback 校验 state → 换 token → upsert 投影（白名单映射 admin）→ 建会话。
 func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
-	if s.oidc == nil {
+	b := s.oidc.Load()
+	if b == nil {
 		http.Error(w, "oidc not configured", http.StatusNotFound)
 		return
 	}
@@ -146,7 +148,7 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "state mismatch", http.StatusBadRequest)
 		return
 	}
-	claims, err := s.oidc.Exchange(r.Context(), q.Get("code"), nonceC.Value)
+	claims, err := b.rp.Exchange(r.Context(), q.Get("code"), nonceC.Value)
 	if err != nil {
 		http.Error(w, "token exchange failed", http.StatusBadGateway)
 		return
@@ -164,7 +166,7 @@ func (s *Service) HandleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	role := "user"
-	for _, sub := range s.adminSubjects {
+	for _, sub := range b.adminSubjects {
 		if sub == claims.Sub {
 			role = "admin"
 		}

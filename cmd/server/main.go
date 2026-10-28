@@ -60,23 +60,38 @@ func main() {
 	svc.SetQueue(buildQueue(cfg))
 
 	// OIDC RP（Mirror 为 IdP）；未配置 Issuer 时 SSO 登录端点返回 404。
+	// 冷启动时 IdP 可能尚未就绪（compose 并行拉起、容器网络 DNS 未注册）：
+	// 启动不阻塞在 discovery 上，否则 hoard 起不来会拖垮整条依赖链。
+	// 后台带退避重试，就绪前 SSO 端点保持 404，就绪后原子激活。
 	if cfg.OIDCIssuer != "" {
 		redirect := cfg.OIDCRedirectURL
 		if redirect == "" {
 			redirect = strings.TrimRight(cfg.BaseURL, "/") + "/auth/oidc/callback"
 		}
-		rp, err := oidcrp.New(context.Background(), oidcrp.Config{
+		oidcCfg := oidcrp.Config{
 			Issuer:          cfg.OIDCIssuer,
 			ClientID:        cfg.OIDCClientID,
 			ClientSecret:    cfg.OIDCClientSecret,
 			RedirectURL:     redirect,
 			InternalBaseURL: cfg.OIDCInternalBaseURL,
-		})
-		if err != nil {
-			log.Fatalf("oidc rp: %v", err)
 		}
-		svc.SetOIDC(rp, cfg.AdminSubjects)
-		log.Printf("OIDC RP enabled (issuer=%s)", cfg.OIDCIssuer)
+		go func() {
+			delay := time.Second
+			for attempt := 1; attempt <= 30; attempt++ {
+				rp, err := oidcrp.New(context.Background(), oidcCfg)
+				if err == nil {
+					svc.SetOIDC(rp, cfg.AdminSubjects)
+					log.Printf("OIDC RP enabled (issuer=%s)", cfg.OIDCIssuer)
+					return
+				}
+				log.Printf("oidc rp: discovery attempt %d/%d failed: %v; retry in %s", attempt, 30, err, delay)
+				time.Sleep(delay)
+				if delay < 10*time.Second {
+					delay *= 2
+				}
+			}
+			log.Printf("oidc rp: giving up after 30 attempts; SSO login stays disabled")
+		}()
 	} else {
 		log.Printf("HOARD_OIDC_ISSUER not set; SSO login disabled")
 	}

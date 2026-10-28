@@ -13,6 +13,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync/atomic"
 
 	"github.com/Mythicove/mythic-hoard/internal/modmeta"
 	"github.com/Mythicove/mythic-hoard/internal/oidcrp"
@@ -20,6 +21,13 @@ import (
 	"github.com/Mythicove/shared/search"
 	"github.com/Mythicove/shared/storage"
 )
+
+// oidcBundle 把 RP 与管理员白名单打包原子替换：SetOIDC 可能在服务已对外
+// 提供之后（后台 discovery 重试成功）才调用，读侧必须无竞态地拿到一致的一对。
+type oidcBundle struct {
+	rp            *oidcrp.RP
+	adminSubjects []string
+}
 
 // Service 串接 Store、对象存储、搜索与队列。
 type Service struct {
@@ -30,8 +38,7 @@ type Service struct {
 	baseURL       string
 	requireReview bool
 	maxFileBytes  int64
-	oidc          *oidcrp.RP
-	adminSubjects []string
+	oidc          atomic.Pointer[oidcBundle]
 	nextOrigins   []string
 }
 
